@@ -1,9 +1,12 @@
-# macOS Agent Testing
+# macOS E2E Testing
 
-This document defines the repeatable manual-testing loop for AI agents working
-on the macOS app. The goal is the native-app equivalent of a Playwright smoke
-test: launch the real app, inspect the visible UI, capture evidence, and keep
-the limits of OS permissions explicit.
+This document defines the repeatable macOS e2e and smoke-testing loop. The goal
+is the native-app equivalent of a Playwright smoke test: launch the real app,
+inspect the visible UI, capture evidence, and keep the limits of OS permissions
+explicit.
+
+For the interactive inspect/control tool used while developing, see
+`docs/MACOS_APP_ACCESS.md`.
 
 ## Testing Levels
 
@@ -12,8 +15,8 @@ Use the cheapest level that proves the change.
 | Level | Command | What it proves |
 | --- | --- | --- |
 | L0 deterministic gate | `make c` | Rust, Swift formatting, linting where installed, Rust tests, Swift build, and Swift test harness pass. |
-| L1 macOS build | `make macos-agent-build` | Rust FFI and the macOS Swift package compile for the local machine. |
-| L2 visible app smoke | `make macos-agent-smoke` | The real macOS app launches, exposes a window to the OS accessibility tree, and a screenshot is captured. |
+| L1 macOS build | `make macos-e2e-build` | Rust FFI and the macOS Swift package compile for the local machine. |
+| L2 visible app smoke | `make macos-e2e-smoke` | The real macOS app launches, exposes a window to the OS accessibility tree, and a screenshot is captured. |
 | L3 manual workflow | Follow the phase checklist in `apps/macos/README.md` | Microphone permission, paste control, active-app insertion, and replacement-rule behavior work in a real text field. |
 
 L0 is required after code changes. L2 is required after changes to SwiftUI,
@@ -22,22 +25,29 @@ environment blocks GUI automation. L3 is required when a change affects
 microphone capture, Accessibility trust, clipboard paste, focus restoration, or
 the end-to-end visible workflow.
 
-## Agent Commands
+## Standard Handoff Rule
 
-The Makefile wraps `tools/macos-agent.sh`.
+For user-visible macOS functionality changes, run `make macos-e2e-smoke` after
+`make c` and before handing work back. If the smoke check is blocked by
+Accessibility, Screen Recording, display capture, or GUI-session limits, report
+the exact blocker and any evidence collected under `.build/e2e/macos/`.
+
+## E2E Commands
+
+The Makefile wraps `tools/macos-e2e.sh`.
 
 ```sh
-make macos-agent-build
-make macos-agent-launch
-make macos-agent-smoke
-make macos-agent-screenshot
-make macos-agent-stop
+make macos-e2e-build
+make macos-e2e-launch
+make macos-e2e-smoke
+make macos-e2e-screenshot
+make macos-e2e-stop
 ```
 
 Generated evidence goes under:
 
 ```text
-.build/agent/macos/
+.build/e2e/macos/
 ```
 
 Important files:
@@ -48,14 +58,17 @@ Important files:
 
 These files are build artifacts and stay ignored by git through `.build/`.
 
+For targeted interaction commands such as `tree`, `press`, `set-text`, and
+`value`, use `make macos-ui CALL_ARGS="..."`.
+
 ## Permissions
 
-macOS GUI automation is permission-gated. Agents must not silently bypass or
-grant these permissions.
+macOS GUI automation is permission-gated. Test runners must not silently bypass
+or grant these permissions.
 
 Required for L2 inspection:
 
-- The terminal or host app running the agent may need Accessibility permission
+- The terminal or host app running the test may need Accessibility permission
   so `System Events` can inspect the app window.
 - The terminal or host app may need Screen Recording permission for reliable
   screenshots.
@@ -73,8 +86,9 @@ alone.
 
 ## Stable UI Hooks
 
-SwiftUI controls that agents or future UI tests need to find should have stable
-accessibility identifiers. Use lower-kebab-case names.
+SwiftUI controls that e2e smoke checks, the app access tool, or future UI tests
+need to find should have stable accessibility identifiers. Use lower-kebab-case
+names.
 
 Current identifiers:
 
@@ -96,23 +110,24 @@ Changing visible copy should not require changing these identifiers.
 
 ## L2 Smoke Contract
 
-`make macos-agent-smoke` should:
+`make macos-e2e-smoke` should:
 
 1. Build Rust FFI and the macOS Swift package.
 2. Launch `SpeechClerkMac` through SwiftPM.
 3. Wait for a visible app window.
 4. Print discovered button names from the accessibility tree.
-5. Capture a screenshot to `.build/agent/macos/SpeechClerkMac.png`.
+5. Capture a screenshot to `.build/e2e/macos/SpeechClerkMac.png`.
 
-This is not a substitute for L3. It proves that the agent can see and inspect
-the native app, not that microphone capture or paste insertion succeeded.
+This is not a substitute for L3. It proves that the test runner can see and
+inspect the native app, not that microphone capture or paste insertion
+succeeded.
 
 ## L3 Manual Workflow Evidence
 
 For phase-one macOS changes, report:
 
 - `make c` result.
-- `make macos-agent-smoke` result, screenshot path, and any permission limits.
+- `make macos-e2e-smoke` result, screenshot path, and any permission limits.
 - Whether microphone permission was allowed or blocked.
 - Whether paste control was allowed or blocked.
 - The target app used for insertion.
@@ -129,6 +144,6 @@ Makefile targets, AppleScript/System Events, screenshots, and manual evidence.
 When the project grows a packaged `.app` or Xcode project, add XCUITest around
 the same accessibility identifiers.
 
-Before real ASR work expands UI testing, add an agent-only deterministic audio
-injection mode so agents can exercise start/stop/transcript behavior without
+Before real ASR work expands UI testing, add a deterministic test audio
+injection mode so e2e tests can exercise start/stop/transcript behavior without
 using the physical microphone.

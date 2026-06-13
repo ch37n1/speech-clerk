@@ -2,7 +2,7 @@
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-STATE_DIR="$ROOT_DIR/.build/agent/macos"
+STATE_DIR="$ROOT_DIR/.build/e2e/macos"
 LOG_FILE="$STATE_DIR/SpeechClerkMac.log"
 PID_FILE="$STATE_DIR/SpeechClerkMac.pid"
 SCREENSHOT_FILE="${SCREENSHOT_FILE:-$STATE_DIR/SpeechClerkMac.png}"
@@ -15,14 +15,14 @@ SWIFT_MODULE_CACHE_PATH="${SWIFT_MODULE_CACHE_PATH:-$ROOT_DIR/.build/swiftpm/cla
 
 usage() {
     cat <<'EOF'
-Usage: tools/macos-agent.sh <command>
+Usage: tools/macos-e2e.sh <command>
 
 Commands:
   build       Build Rust FFI and the macOS Swift package
   launch      Build and launch SpeechClerkMac in the background
   wait-window Wait until the app exposes a visible window
   inspect     Print basic UI elements through System Events
-  screenshot  Capture a screenshot into .build/agent/macos
+  screenshot  Capture a screenshot into .build/e2e/macos
   smoke       Launch, wait for a window, inspect, and screenshot
   stop        Stop the launched app process
 EOF
@@ -134,7 +134,7 @@ smoke_app() {
         :
     else
         status=$?
-        echo "Window inspection failed. macOS may require Accessibility permission for the host terminal or agent app." >&2
+        echo "Window inspection failed. macOS may require Accessibility permission for the host terminal or test runner." >&2
         capture_screenshot || echo "Screenshot capture also failed. macOS may require Screen Recording permission." >&2
         exit "$status"
     fi
@@ -143,7 +143,7 @@ smoke_app() {
         :
     else
         status=$?
-        echo "UI inspection failed. macOS may require Accessibility permission for the host terminal or agent app." >&2
+        echo "UI inspection failed. macOS may require Accessibility permission for the host terminal or test runner." >&2
         capture_screenshot || echo "Screenshot capture also failed. macOS may require Screen Recording permission." >&2
         exit "$status"
     fi

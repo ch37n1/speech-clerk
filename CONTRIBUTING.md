@@ -43,6 +43,8 @@ Types: `feat`, `fix`, `docs`, `test`, `refactor`, `chore`, `perf`, `ci`.
 - Description explains what changed and why.
 - Link related issues or design docs when available.
 - `make c` must pass before review.
+- User-visible macOS functionality changes must include `make macos-e2e-smoke` evidence, or a clear note explaining the macOS permission/environment blocker.
+- macOS UI changes should use `docs/MACOS_APP_ACCESS.md` for inspect/control workflow while developing.
 - Public API or FFI changes must include tests and documentation updates.
 
 ## Quality Gate
@@ -89,7 +91,9 @@ Follow `docs/DDD_GUIDE.md`.
 - Add focused unit tests for new Rust behavior.
 - Add integration tests when behavior crosses crate boundaries.
 - Add Swift tests for platform-edge behavior that does not require real microphone, Accessibility, or focus permissions.
-- Use `docs/MACOS_AGENT_TESTING.md` for repeatable macOS app smoke checks and manual workflow evidence.
+- Use `docs/MACOS_APP_ACCESS.md` and `make macos-ui CALL_ARGS="..."` to inspect and operate the macOS app during development.
+- Use `docs/MACOS_E2E_TESTING.md` for repeatable macOS app smoke checks and manual workflow evidence.
+- Run `make macos-e2e-smoke` after user-visible macOS functionality changes. If it is blocked by Accessibility, Screen Recording, or GUI-session limits, record the blocker in the handoff.
 - Add manual verification notes to the relevant roadmap phase when work changes a visible app workflow.
 - Keep platform-specific code covered at the thinnest practical boundary.
 

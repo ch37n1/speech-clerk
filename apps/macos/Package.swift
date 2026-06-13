@@ -29,6 +29,7 @@ let package = Package(
     products: [
         .executable(name: "SpeechClerkMac", targets: ["SpeechClerkMac"]),
         .executable(name: "SpeechClerkMacUnitTests", targets: ["SpeechClerkMacUnitTests"]),
+        .executable(name: "SpeechClerkMacUITool", targets: ["SpeechClerkMacUITool"]),
     ],
     targets: [
         .target(
@@ -49,6 +50,10 @@ let package = Package(
             name: "SpeechClerkMacUnitTests",
             dependencies: ["SpeechClerkMacSupport"],
             path: "Tests/SpeechClerkMacTests"
+        ),
+        .executableTarget(
+            name: "SpeechClerkMacUITool",
+            path: "Tools/SpeechClerkMacUITool"
         ),
     ]
 )

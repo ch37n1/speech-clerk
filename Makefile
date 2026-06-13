@@ -20,7 +20,7 @@ SWIFT_SOURCES := $(shell find apps/macos \
 	-path '*/Generated/UniFFI/*' -prune -o \
 	-name '*.swift' -print 2>/dev/null)
 
-.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check macos-agent-build macos-agent-launch macos-agent-smoke macos-agent-screenshot macos-agent-stop fix check clippy test deny machete bacon web-check c clean
+.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check macos-ui macos-ui-build macos-e2e-build macos-e2e-launch macos-e2e-smoke macos-e2e-screenshot macos-e2e-stop fix check clippy test deny machete bacon web-check c clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -81,20 +81,26 @@ swift-test: ## Test the macOS Swift package
 
 swift-check: swift-fmt-check swift-lint swift-build swift-test ## Run the Swift quality gate
 
-macos-agent-build: ## Build the macOS app for agent manual testing
-	@sh tools/macos-agent.sh build
+macos-ui: ## Run the macOS UI access tool with CALL_ARGS
+	@sh tools/macos-ui.sh $(CALL_ARGS)
 
-macos-agent-launch: ## Launch the macOS app for agent manual testing
-	@sh tools/macos-agent.sh launch
+macos-ui-build: ## Build the macOS UI access tool
+	@sh tools/macos-ui.sh build
 
-macos-agent-smoke: ## Launch, inspect, and screenshot the macOS app
-	@sh tools/macos-agent.sh smoke
+macos-e2e-build: ## Build the macOS app for e2e testing
+	@sh tools/macos-e2e.sh build
 
-macos-agent-screenshot: ## Capture a macOS agent testing screenshot
-	@sh tools/macos-agent.sh screenshot
+macos-e2e-launch: ## Launch the macOS app for e2e testing
+	@sh tools/macos-e2e.sh launch
 
-macos-agent-stop: ## Stop the macOS app launched for agent testing
-	@sh tools/macos-agent.sh stop
+macos-e2e-smoke: ## Launch, inspect, and screenshot the macOS app
+	@sh tools/macos-e2e.sh smoke
+
+macos-e2e-screenshot: ## Capture a macOS e2e screenshot
+	@sh tools/macos-e2e.sh screenshot
+
+macos-e2e-stop: ## Stop the macOS app launched for e2e testing
+	@sh tools/macos-e2e.sh stop
 
 fix: ## Apply safe Rust compiler fixes
 	@if [ "$(HAS_CARGO_WORKSPACE)" = "yes" ]; then $(CARGO) fix --workspace --all-targets --all-features --allow-dirty; else echo "No Cargo workspace found; skipping cargo fix"; fi

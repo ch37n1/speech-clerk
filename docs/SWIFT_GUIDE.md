@@ -123,7 +123,8 @@ make swift-lint
 make swift-build
 make swift-test
 make swift-check
-make macos-agent-smoke
+make macos-ui CALL_ARGS="tree --max-depth 8"
+make macos-e2e-smoke
 make c
 ```
 
@@ -155,5 +156,6 @@ Good Swift test subjects:
 Manual verification remains required for microphone capture, paste control,
 global focus behavior, and the full visible dictation workflow.
 
-Use `docs/MACOS_AGENT_TESTING.md` for the agent-facing macOS smoke and manual
-workflow evidence contract.
+Use `docs/MACOS_APP_ACCESS.md` for the macOS app inspection/control flow. Use
+`docs/MACOS_E2E_TESTING.md` for the macOS smoke and manual workflow evidence
+contract.
