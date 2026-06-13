@@ -1,0 +1,44 @@
+[Error]
+enum DictationFfiError {
+    "ControllerUnavailable",
+    "Core",
+};
+
+dictionary DictationConfig {
+    string model_packs_dir;
+};
+
+dictionary ReplacementRule {
+    string pattern;
+    string replacement;
+};
+
+dictionary Transcript {
+    string text;
+    string? language;
+};
+
+enum LanguageMode {
+    "Auto",
+    "Manual",
+};
+
+interface DictationController {
+    constructor(DictationConfig config);
+    [Throws=DictationFfiError]
+    void load_model(string model_id);
+    [Throws=DictationFfiError]
+    void start_recording();
+    [Throws=DictationFfiError]
+    void push_audio(sequence<float> samples, u32 sample_rate_hz, u16 channels);
+    [Throws=DictationFfiError]
+    Transcript? stop_recording();
+    [Throws=DictationFfiError]
+    void cancel_recording();
+    [Throws=DictationFfiError]
+    void set_language_mode(LanguageMode mode, string? manual_language);
+    [Throws=DictationFfiError]
+    void set_replacement_rules(sequence<ReplacementRule> rules);
+};
+
+namespace speech_clerk {};

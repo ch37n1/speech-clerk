@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "modelId": "fake-local",
+  "displayName": "Fake Local Model",
+  "runtime": "fake",
+  "quantization": "none",
+  "audio": {
+    "sampleRateHz": 16000,
+    "channels": 1,
+    "sampleFormat": "f32"
+  },
+  "languages": ["en", "ru"],
+  "capabilities": {
+    "chunked": true,
+    "streaming": false,
+    "timestamps": false,
+    "punctuation": true,
+    "languageDetection": false
+  },
+  "files": [
+    {
+      "role": "fake-config",
+      "path": "fake_asr.txt",
+      "sha256": ""
+    }
+  ]
+}

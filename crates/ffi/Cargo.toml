@@ -5,8 +5,24 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[lib]
+name = "speech_clerk_ffi"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
 [dependencies]
 dictation-core = { path = "../dictation-core" }
+postprocess = { path = "../postprocess" }
+uniffi = "0.31.1"
 
-[lints]
-workspace = true
+[build-dependencies]
+uniffi = { version = "0.31.1", features = ["build"] }
+
+[lints.rust]
+missing_docs = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+unsafe_code = "allow"
+
+[lints.clippy]
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"
