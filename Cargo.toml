@@ -1,0 +1,25 @@
+[workspace]
+members = [
+    "crates/asr-api",
+    "crates/audio-pipeline",
+    "crates/dictation-core",
+    "crates/ffi",
+    "crates/model-pack",
+    "crates/postprocess",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
