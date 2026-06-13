@@ -22,6 +22,7 @@ The V1 Rust workspace starts with these crates:
 - `ffi`: UniFFI-exported product API for Swift and Kotlin.
 
 Native apps stay under `apps/` and should call only the product-level FFI API.
+For macOS-specific Swift conventions, follow `docs/SWIFT_GUIDE.md`.
 
 ## Boundary Rules
 

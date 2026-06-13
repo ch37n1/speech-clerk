@@ -61,11 +61,15 @@ The gate is intentionally strict:
 - Tests with `cargo test`
 - Dependency/security checks with `cargo-deny` when available
 - Dead-code dependency checks with `cargo-machete` when available
+- Swift formatting with Apple `swift-format`
+- Swift package build and tests for `apps/macos`
+- SwiftLint checks when `swiftlint` is installed
 
 Install optional tools with:
 
 ```sh
 make install-tools
+make install-swift-tools
 ```
 
 ## Architecture Rules
@@ -74,6 +78,7 @@ Follow `docs/DDD_GUIDE.md`.
 
 - Organize by product/domain responsibility, not by generic technical buckets.
 - Keep platform apps thin. Swift and Kotlin handle platform capture, permissions, and text insertion only.
+- Follow `docs/SWIFT_GUIDE.md` for macOS Swift boundaries and local tooling.
 - Keep dictation state, chunking, model-pack validation, ASR orchestration, post-processing, and language selection in Rust.
 - Keep concrete ONNX Runtime code behind `asr-api`.
 - Do not introduce a second ASR backend before the ONNX path is working and benchmarked.
@@ -83,6 +88,7 @@ Follow `docs/DDD_GUIDE.md`.
 
 - Add focused unit tests for new Rust behavior.
 - Add integration tests when behavior crosses crate boundaries.
+- Add Swift tests for platform-edge behavior that does not require real microphone, Accessibility, or focus permissions.
 - Add manual verification notes to the relevant roadmap phase when work changes a visible app workflow.
 - Keep platform-specific code covered at the thinnest practical boundary.
 

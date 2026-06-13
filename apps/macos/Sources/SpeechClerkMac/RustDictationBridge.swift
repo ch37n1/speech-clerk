@@ -34,7 +34,8 @@ final class RustDictationBridge: @unchecked Sendable {
     }
 
     func setReplacement(pattern: String, replacement: String) throws {
-        let rules = pattern.isEmpty
+        let rules =
+            pattern.isEmpty
             ? []
             : [ReplacementRule(pattern: pattern, replacement: replacement)]
         try controller.setReplacementRules(rules: rules)

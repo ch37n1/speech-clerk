@@ -1,3 +1,4 @@
+import SpeechClerkMacSupport
 import SwiftUI
 
 struct ContentView: View {
@@ -98,8 +99,11 @@ struct ContentView: View {
                 Button {
                     viewModel.toggleRecording()
                 } label: {
-                    Label(viewModel.isRecording ? "Stop" : "Record", systemImage: viewModel.isRecording ? "stop.fill" : "record.circle")
-                        .frame(minWidth: 110)
+                    Label(
+                        viewModel.isRecording ? "Stop" : "Record",
+                        systemImage: viewModel.isRecording ? "stop.fill" : "record.circle"
+                    )
+                    .frame(minWidth: 110)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(viewModel.isRecording ? .red : .accentColor)

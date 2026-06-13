@@ -1,0 +1,35 @@
+included:
+  - apps/macos/Package.swift
+  - apps/macos/Sources
+  - apps/macos/Tests
+
+excluded:
+  - apps/macos/.build
+  - apps/macos/.swiftpm
+  - apps/macos/Sources/SpeechClerkMac/Generated
+
+only_rules:
+  - colon
+  - comma
+  - empty_count
+  - force_cast
+  - force_try
+  - force_unwrapping
+  - line_length
+  - opening_brace
+  - operator_whitespace
+  - redundant_optional_initialization
+  - return_arrow_whitespace
+  - trailing_whitespace
+  - vertical_whitespace
+  - void_return
+
+line_length:
+  warning: 120
+  error: 160
+  ignores_comments: true
+  ignores_urls: true
+
+force_cast: error
+force_try: error
+force_unwrapping: warning

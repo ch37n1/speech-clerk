@@ -20,7 +20,7 @@ final class ActiveApplicationTracker {
 
     @objc private func applicationDidActivate(_ notification: Notification) {
         guard let application = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-              application.bundleIdentifier != currentBundleIdentifier
+            application.bundleIdentifier != currentBundleIdentifier
         else {
             return
         }

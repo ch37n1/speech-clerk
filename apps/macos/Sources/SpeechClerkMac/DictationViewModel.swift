@@ -1,6 +1,7 @@
 import AVFoundation
 import AppKit
 import Foundation
+import SpeechClerkMacSupport
 
 @MainActor
 final class DictationViewModel: ObservableObject {
