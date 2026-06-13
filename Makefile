@@ -20,7 +20,7 @@ SWIFT_SOURCES := $(shell find apps/macos \
 	-path '*/Generated/UniFFI/*' -prune -o \
 	-name '*.swift' -print 2>/dev/null)
 
-.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check fix check clippy test deny machete bacon web-check c clean
+.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check macos-agent-build macos-agent-launch macos-agent-smoke macos-agent-screenshot macos-agent-stop fix check clippy test deny machete bacon web-check c clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -80,6 +80,21 @@ swift-test: ## Test the macOS Swift package
 	else echo "No Swift package found; skipping Swift tests"; fi
 
 swift-check: swift-fmt-check swift-lint swift-build swift-test ## Run the Swift quality gate
+
+macos-agent-build: ## Build the macOS app for agent manual testing
+	@sh tools/macos-agent.sh build
+
+macos-agent-launch: ## Launch the macOS app for agent manual testing
+	@sh tools/macos-agent.sh launch
+
+macos-agent-smoke: ## Launch, inspect, and screenshot the macOS app
+	@sh tools/macos-agent.sh smoke
+
+macos-agent-screenshot: ## Capture a macOS agent testing screenshot
+	@sh tools/macos-agent.sh screenshot
+
+macos-agent-stop: ## Stop the macOS app launched for agent testing
+	@sh tools/macos-agent.sh stop
 
 fix: ## Apply safe Rust compiler fixes
 	@if [ "$(HAS_CARGO_WORKSPACE)" = "yes" ]; then $(CARGO) fix --workspace --all-targets --all-features --allow-dirty; else echo "No Cargo workspace found; skipping cargo fix"; fi

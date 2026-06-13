@@ -53,7 +53,7 @@ Out of scope:
 
 Manual verification deliverable:
 
-Launch the macOS app, select the fake local model pack, open a text editor or browser text field, start dictation from the app or hotkey, speak into the microphone, stop dictation, and confirm that a fake transcript is inserted into the active field. Change a custom replacement rule in settings, repeat the flow, and confirm that the inserted text changes.
+Launch the macOS app, select the fake local model pack, open a text editor or browser text field, start dictation from the app or hotkey, speak into the microphone, stop dictation, and confirm that a fake transcript is inserted into the active field. Change a custom replacement rule in settings, repeat the flow, and confirm that the inserted text changes. Use `docs/MACOS_AGENT_TESTING.md` for repeatable agent smoke evidence before or alongside this manual workflow.
 
 ## Phase 2 - macOS App With Real Local ONNX Transcription
 

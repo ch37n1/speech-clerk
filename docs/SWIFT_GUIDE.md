@@ -123,6 +123,7 @@ make swift-lint
 make swift-build
 make swift-test
 make swift-check
+make macos-agent-smoke
 make c
 ```
 
@@ -153,3 +154,6 @@ Good Swift test subjects:
 
 Manual verification remains required for microphone capture, paste control,
 global focus behavior, and the full visible dictation workflow.
+
+Use `docs/MACOS_AGENT_TESTING.md` for the agent-facing macOS smoke and manual
+workflow evidence contract.

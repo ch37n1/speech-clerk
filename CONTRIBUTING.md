@@ -89,6 +89,7 @@ Follow `docs/DDD_GUIDE.md`.
 - Add focused unit tests for new Rust behavior.
 - Add integration tests when behavior crosses crate boundaries.
 - Add Swift tests for platform-edge behavior that does not require real microphone, Accessibility, or focus permissions.
+- Use `docs/MACOS_AGENT_TESTING.md` for repeatable macOS app smoke checks and manual workflow evidence.
 - Add manual verification notes to the relevant roadmap phase when work changes a visible app workflow.
 - Keep platform-specific code covered at the thinnest practical boundary.
 

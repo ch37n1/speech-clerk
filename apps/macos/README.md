@@ -3,6 +3,8 @@
 Native SwiftUI/AppKit shell for Phase 1 fake dictation.
 
 Swift conventions and tooling are documented in `../../docs/SWIFT_GUIDE.md`.
+Agent smoke and manual verification are documented in
+`../../docs/MACOS_AGENT_TESTING.md`.
 
 Run from the repository root:
 
@@ -20,6 +22,7 @@ make swift-lint
 make swift-build
 make swift-test
 make swift-check
+make macos-agent-smoke
 make c
 ```
 
@@ -35,7 +38,7 @@ flow.
 
 Manual Phase 1 check:
 
-1. Launch the app with the commands above.
+1. Run `make macos-agent-smoke` or launch the app with the commands above.
 2. Allow microphone access and paste control when prompted.
 3. Open a text editor or browser text field, then return to Speech Clerk.
 4. Load `Fake Local Model`, click Record, speak briefly, then click Stop.

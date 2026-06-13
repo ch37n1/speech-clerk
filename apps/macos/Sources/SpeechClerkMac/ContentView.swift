@@ -15,6 +15,7 @@ struct ContentView: View {
 
                 Label(viewModel.statusText, systemImage: viewModel.isRecording ? "record.circle" : "checkmark.circle")
                     .foregroundStyle(viewModel.isRecording ? .red : .secondary)
+                    .accessibilityIdentifier("app-status")
             }
 
             Divider()
@@ -28,6 +29,7 @@ struct ContentView: View {
                         Text(model.displayName).tag(model.id)
                     }
                 }
+                .accessibilityIdentifier("model-picker")
                 .labelsHidden()
                 .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -36,6 +38,7 @@ struct ContentView: View {
                 } label: {
                     Label("Load Model", systemImage: "square.and.arrow.down")
                 }
+                .accessibilityIdentifier("load-model-button")
                 .disabled(viewModel.selectedModelID.isEmpty)
             }
 
@@ -49,9 +52,11 @@ struct ContentView: View {
                     } label: {
                         Label("Allow Microphone", systemImage: "mic")
                     }
+                    .accessibilityIdentifier("microphone-permission-button")
 
                     Text(viewModel.microphoneStateText)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("microphone-permission-status")
                 }
 
                 HStack {
@@ -60,9 +65,11 @@ struct ContentView: View {
                     } label: {
                         Label("Allow Paste Control", systemImage: "keyboard")
                     }
+                    .accessibilityIdentifier("paste-permission-button")
 
                     Text(viewModel.pasteControlStateText)
                         .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("paste-permission-status")
                 }
             }
 
@@ -76,6 +83,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                         TextField("parakeet", text: $viewModel.replacementPattern)
                             .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("replacement-pattern-field")
                     }
 
                     GridRow {
@@ -83,6 +91,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                         TextField("Canary", text: $viewModel.replacementValue)
                             .textFieldStyle(.roundedBorder)
+                            .accessibilityIdentifier("replacement-value-field")
                     }
                 }
 
@@ -91,6 +100,7 @@ struct ContentView: View {
                 } label: {
                     Label("Apply", systemImage: "checkmark")
                 }
+                .accessibilityIdentifier("apply-replacement-button")
             }
 
             Spacer(minLength: 8)
@@ -107,6 +117,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(viewModel.isRecording ? .red : .accentColor)
+                .accessibilityIdentifier("record-toggle-button")
                 .disabled(!viewModel.canRecord)
 
                 Button {
@@ -114,6 +125,7 @@ struct ContentView: View {
                 } label: {
                     Label("Cancel", systemImage: "xmark")
                 }
+                .accessibilityIdentifier("cancel-recording-button")
                 .disabled(!viewModel.isRecording)
 
                 Spacer()
@@ -125,6 +137,7 @@ struct ContentView: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("last-transcript")
             }
         }
         .padding(24)
