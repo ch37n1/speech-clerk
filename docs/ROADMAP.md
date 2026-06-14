@@ -153,6 +153,11 @@ Scope:
 - Harden microphone permission and failure states.
 - Harden clipboard restore behavior on macOS.
 - Harden Android IME lifecycle handling.
+- Polish the visible macOS and Android UI:
+  - clearer visual hierarchy and spacing
+  - consistent typography, controls, and icons
+  - understandable idle, recording, transcribing, error, and model-missing states
+  - accessible labels, focus behavior, and contrast for the primary workflows
 - Add practical logging with `tracing`.
 - Verify local-only behavior.
 - Document installation, model-pack setup, benchmark usage, and known limitations.
@@ -169,4 +174,4 @@ Out of scope:
 
 Manual verification deliverable:
 
-Install the macOS app and Android IME from clean release-candidate builds, install the default model pack locally, dictate into real text fields on both platforms, run the benchmark workflow, and confirm that documented setup steps are sufficient for another person to repeat the workflow without developer assistance.
+Install the macOS app and Android IME from clean release-candidate builds, install the default model pack locally, dictate into real text fields on both platforms, run the benchmark workflow, and confirm that documented setup steps are sufficient for another person to repeat the workflow without developer assistance. During the same pass, review the primary macOS and Android surfaces in idle, recording, transcribing, permission/error, and model-missing states, and confirm that the UI looks coherent enough for a V1 release candidate.
