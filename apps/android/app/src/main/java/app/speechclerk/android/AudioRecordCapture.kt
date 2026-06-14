@@ -20,25 +20,27 @@ final class AudioRecordCapture {
             return
         }
 
-        val minBufferSize = AudioRecord.getMinBufferSize(
-            SAMPLE_RATE_HZ,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-        )
+        val minBufferSize =
+            AudioRecord.getMinBufferSize(
+                SAMPLE_RATE_HZ,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+            )
         require(minBufferSize > 0) { "AudioRecord buffer size is unavailable" }
 
         val bufferSize = max(minBufferSize, SAMPLE_RATE_HZ / 5)
-        val recorder = AudioRecord.Builder()
-            .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
-            .setAudioFormat(
-                AudioFormat.Builder()
-                    .setSampleRate(SAMPLE_RATE_HZ)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
-                    .build()
-            )
-            .setBufferSizeInBytes(bufferSize)
-            .build()
+        val recorder =
+            AudioRecord.Builder()
+                .setAudioSource(MediaRecorder.AudioSource.VOICE_RECOGNITION)
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setSampleRate(SAMPLE_RATE_HZ)
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(bufferSize)
+                .build()
 
         require(recorder.state == AudioRecord.STATE_INITIALIZED) {
             "AudioRecord failed to initialize"
@@ -47,13 +49,13 @@ final class AudioRecordCapture {
         recorder.startRecording()
         audioRecord = recorder
         running.set(true)
-        worker = Thread {
-            readLoop(recorder, bufferSize, onSamples)
-        }.apply {
-            name = "SpeechClerkAudioRecord"
-            isDaemon = true
-            start()
-        }
+        worker =
+            Thread { readLoop(recorder, bufferSize, onSamples) }
+                .apply {
+                    name = "SpeechClerkAudioRecord"
+                    isDaemon = true
+                    start()
+                }
     }
 
     fun stop() {
@@ -65,8 +67,7 @@ final class AudioRecordCapture {
         audioRecord = null
         try {
             recorder?.stop()
-        } catch (_: IllegalStateException) {
-        } finally {
+        } catch (_: IllegalStateException) {} finally {
             recorder?.release()
         }
 

@@ -73,6 +73,27 @@ sdkmanager --licenses
 gradle -p apps/android assembleDebug
 ```
 
+## Kotlin Quality
+
+Android Kotlin formatting and static analysis are part of the repository quality
+gate:
+
+```sh
+make kotlin-fmt
+make kotlin-fmt-check
+make kotlin-lint
+make android-check
+```
+
+`ktfmt` formats first-party Android Kotlin sources. Detekt checks the same
+first-party Android package with configuration in `config/detekt/detekt.yml`.
+Generated UniFFI bindings under `app/speechclerk/ffi` are excluded from both
+tools and should be regenerated with `make android-uniffi`.
+
+The Makefile prefers Homebrew `openjdk@17` or `openjdk@21` for Android Gradle
+tasks when either is installed. Detekt 1.23.x does not run correctly on newer
+JDKs such as OpenJDK 25.
+
 ## Manual Check
 
 1. Install the debug APK on an Android device.

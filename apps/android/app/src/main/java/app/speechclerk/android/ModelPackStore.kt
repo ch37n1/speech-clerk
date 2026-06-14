@@ -10,17 +10,16 @@ object ModelPackStore {
 
     fun installedModelIds(context: Context): List<String> {
         val root = modelPacksDir(context)
-        return root.listFiles()
+        return root
+            .listFiles()
             ?.asSequence()
             ?.filter(File::isDirectory)
             ?.mapNotNull(::manifestModelId)
             ?.sorted()
-            ?.toList()
-            ?: emptyList()
+            ?.toList() ?: emptyList()
     }
 
-    fun defaultModelId(context: Context): String? =
-        installedModelIds(context).firstOrNull()
+    fun defaultModelId(context: Context): String? = installedModelIds(context).firstOrNull()
 
     fun manualLanguageOverride(context: Context): String? =
         context
