@@ -8,6 +8,9 @@ Speech Clerk is a local-first speech-to-text app. V1 targets macOS first and And
 - `docs/ROADMAP.md` defines phase-by-phase manual verification deliverables.
 - `docs/DDD_GUIDE.md` defines crate boundaries and domain ownership rules.
 - `docs/SWIFT_GUIDE.md` defines macOS Swift boundaries, tooling, and tests.
+- `apps/android/README.md` defines Android IME setup, native library packaging,
+  and manual verification.
+- `docs/ANDROID_IME_TESTING.md` defines the repeatable Android IME smoke loop.
 - `docs/MACOS_APP_ACCESS.md` defines how agents inspect and operate the macOS app.
 - `docs/MACOS_E2E_TESTING.md` defines the repeatable macOS e2e smoke loop.
 - `CONTRIBUTING.md` defines branch, commit, PR, testing, and quality practices.

@@ -47,6 +47,54 @@ pub enum LanguageMode {
     Manual(String),
 }
 
+/// Platform language signals used by the Rust-owned V1 priority order.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LanguageContext {
+    /// Active keyboard or input-method language, when the platform exposes it.
+    pub active_keyboard_language: Option<String>,
+    /// Language inferred from the active input field or editor context.
+    pub platform_input_language: Option<String>,
+    /// Explicit user override kept as the final fallback.
+    pub manual_override: Option<String>,
+}
+
+impl LanguageContext {
+    /// Create a normalized language context from platform language tags.
+    #[must_use]
+    pub fn new(
+        active_keyboard_language: Option<String>,
+        platform_input_language: Option<String>,
+        manual_override: Option<String>,
+    ) -> Self {
+        Self {
+            active_keyboard_language: normalize_language_tag(active_keyboard_language),
+            platform_input_language: normalize_language_tag(platform_input_language),
+            manual_override: normalize_language_tag(manual_override),
+        }
+    }
+
+    fn language_hint(
+        &self,
+        backend_supports_language_detection: bool,
+        last_used_language: Option<&str>,
+    ) -> Option<String> {
+        if let Some(language) = &self.active_keyboard_language {
+            return Some(language.clone());
+        }
+
+        if let Some(language) = &self.platform_input_language {
+            return Some(language.clone());
+        }
+
+        if backend_supports_language_detection {
+            return None;
+        }
+
+        normalize_language_tag(last_used_language.map(str::to_owned))
+            .or_else(|| self.manual_override.clone())
+    }
+}
+
 /// Visible recording state owned by the Rust core.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecordingState {
@@ -111,7 +159,8 @@ pub struct DictationController {
     audio_processor_config: AudioProcessorConfig,
     audio_processor: Option<AudioProcessor>,
     post_processor: PostProcessor,
-    language_mode: LanguageMode,
+    language_context: LanguageContext,
+    last_used_language: Option<String>,
     state: RecordingState,
 }
 
@@ -132,7 +181,8 @@ impl DictationController {
             audio_processor_config: AudioProcessorConfig::default(),
             audio_processor: None,
             post_processor: PostProcessor::with_replacements(config.replacement_rules),
-            language_mode: LanguageMode::Auto,
+            language_context: LanguageContext::default(),
+            last_used_language: None,
             state: RecordingState::Idle,
         }
     }
@@ -238,6 +288,11 @@ impl DictationController {
             text: self.post_processor.process(&transcript_text),
             language: transcript_language,
         };
+
+        if let Some(language) = &transcript.language {
+            self.last_used_language = Some(language.clone());
+        }
+
         Ok(Some(transcript))
     }
 
@@ -258,7 +313,19 @@ impl DictationController {
 
     /// Set the language mode used for subsequent transcriptions.
     pub fn set_language_mode(&mut self, mode: LanguageMode) {
-        self.language_mode = mode;
+        self.language_context.manual_override = match mode {
+            LanguageMode::Auto => None,
+            LanguageMode::Manual(language) => normalize_language_tag(Some(language)),
+        };
+    }
+
+    /// Replace the platform language context used for subsequent transcriptions.
+    pub fn set_language_context(&mut self, context: LanguageContext) {
+        self.language_context = LanguageContext::new(
+            context.active_keyboard_language,
+            context.platform_input_language,
+            context.manual_override,
+        );
     }
 
     /// Replace deterministic post-processing rules.
@@ -281,13 +348,19 @@ impl DictationController {
     }
 
     fn transcribe_options_for_current_state(&self) -> asr_api::TranscribeOptions {
-        let language_hint = match &self.language_mode {
-            LanguageMode::Auto => None,
-            LanguageMode::Manual(language) => Some(language.clone()),
-        };
+        let language_hint = self.language_context.language_hint(
+            self.engine.capabilities().supports_language_detection,
+            self.last_used_language.as_deref(),
+        );
 
         asr_api::TranscribeOptions { language_hint }
     }
+}
+
+fn normalize_language_tag(language: Option<String>) -> Option<String> {
+    language
+        .map(|value| value.trim().replace('_', "-"))
+        .filter(|value| !value.is_empty())
 }
 
 /// Phase 1 fake backend implementing the real ASR engine trait.
@@ -390,7 +463,9 @@ fn model_config_from_pack(pack: &ModelPack) -> ModelConfig {
 
 #[cfg(test)]
 mod tests {
-    use super::{DictationConfig, DictationController, DictationError, LanguageMode};
+    use super::{
+        DictationConfig, DictationController, DictationError, LanguageContext, LanguageMode,
+    };
     use postprocess::ReplacementRule;
     use std::fs;
     use std::path::PathBuf;
@@ -472,6 +547,89 @@ mod tests {
         ));
         let _ = fs::remove_dir_all(&root);
         Ok(())
+    }
+
+    #[test]
+    fn active_keyboard_language_beats_manual_language() -> Result<(), Box<dyn std::error::Error>> {
+        let root = create_fake_pack()?;
+        let mut controller = DictationController::new(DictationConfig::new(&root));
+
+        controller.load_model("fake-local")?;
+        controller.set_language_context(LanguageContext::new(
+            Some("ru_RU".to_owned()),
+            None,
+            Some("en".to_owned()),
+        ));
+        controller.start_recording()?;
+        controller.push_audio(vec![0.1; 16_000], 16_000, 1)?;
+        let transcript = controller.stop_recording()?;
+
+        assert!(matches!(
+            transcript
+                .as_ref()
+                .and_then(|value| value.language.as_deref()),
+            Some("ru-RU")
+        ));
+        let _ = fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn platform_language_is_second_priority() -> Result<(), Box<dyn std::error::Error>> {
+        let root = create_fake_pack()?;
+        let mut controller = DictationController::new(DictationConfig::new(&root));
+
+        controller.load_model("fake-local")?;
+        controller.set_language_context(LanguageContext::new(
+            None,
+            Some("de".to_owned()),
+            Some("en".to_owned()),
+        ));
+        controller.start_recording()?;
+        controller.push_audio(vec![0.1; 16_000], 16_000, 1)?;
+        let transcript = controller.stop_recording()?;
+
+        assert!(matches!(
+            transcript
+                .as_ref()
+                .and_then(|value| value.language.as_deref()),
+            Some("de")
+        ));
+        let _ = fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn last_used_language_beats_manual_fallback() -> Result<(), Box<dyn std::error::Error>> {
+        let root = create_fake_pack()?;
+        let mut controller = DictationController::new(DictationConfig::new(&root));
+
+        controller.load_model("fake-local")?;
+        controller.set_language_context(LanguageContext::new(Some("ru".to_owned()), None, None));
+        controller.start_recording()?;
+        controller.push_audio(vec![0.1; 16_000], 16_000, 1)?;
+        let _ = controller.stop_recording()?;
+
+        controller.set_language_context(LanguageContext::new(None, None, Some("en".to_owned())));
+        controller.start_recording()?;
+        controller.push_audio(vec![0.1; 16_000], 16_000, 1)?;
+        let transcript = controller.stop_recording()?;
+
+        assert!(matches!(
+            transcript
+                .as_ref()
+                .and_then(|value| value.language.as_deref()),
+            Some("ru")
+        ));
+        let _ = fs::remove_dir_all(&root);
+        Ok(())
+    }
+
+    #[test]
+    fn language_hint_defers_to_model_auto_detection_before_manual() {
+        let context = LanguageContext::new(None, None, Some("en".to_owned()));
+
+        assert_eq!(context.language_hint(true, Some("ru")), None);
     }
 
     fn create_fake_pack() -> Result<PathBuf, Box<dyn std::error::Error>> {

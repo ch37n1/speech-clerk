@@ -18,6 +18,12 @@ dictionary Transcript {
     string? language;
 };
 
+dictionary LanguageContext {
+    string? active_keyboard_language;
+    string? platform_input_language;
+    string? manual_override;
+};
+
 enum LanguageMode {
     "Auto",
     "Manual",
@@ -37,6 +43,8 @@ interface DictationController {
     void cancel_recording();
     [Throws=DictationFfiError]
     void set_language_mode(LanguageMode mode, string? manual_language);
+    [Throws=DictationFfiError]
+    void set_language_context(LanguageContext context);
     [Throws=DictationFfiError]
     void set_replacement_rules(sequence<ReplacementRule> rules);
 };

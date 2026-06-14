@@ -14,7 +14,7 @@ use asr_api::{
 use asr_onnx::OrtAsrEngine;
 use dictation_core::{
     DictationConfig as CoreDictationConfig, DictationController as CoreDictationController,
-    FakeAsrEngine, LanguageMode as CoreLanguageMode,
+    FakeAsrEngine, LanguageContext as CoreLanguageContext, LanguageMode as CoreLanguageMode,
 };
 use postprocess::ReplacementRule as CoreReplacementRule;
 
@@ -62,6 +62,33 @@ pub enum LanguageMode {
     Auto,
     /// Manual language hint.
     Manual,
+}
+
+/// FFI-friendly platform language context.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct LanguageContext {
+    /// Active keyboard or input-method language, when known.
+    pub active_keyboard_language: Option<String>,
+    /// Active editor or input-field language hint, when known.
+    pub platform_input_language: Option<String>,
+    /// Manual fallback language hint.
+    pub manual_override: Option<String>,
+}
+
+impl LanguageContext {
+    /// Create an FFI language context.
+    #[must_use]
+    pub fn new(
+        active_keyboard_language: Option<String>,
+        platform_input_language: Option<String>,
+        manual_override: Option<String>,
+    ) -> Self {
+        Self {
+            active_keyboard_language,
+            platform_input_language,
+            manual_override,
+        }
+    }
 }
 
 /// FFI-friendly transcript.
@@ -162,6 +189,18 @@ impl DictationController {
                     _ => CoreLanguageMode::Auto,
                 },
             });
+            Ok(())
+        })
+    }
+
+    /// Replace platform language context for the Rust-owned V1 priority order.
+    pub fn set_language_context(&self, context: LanguageContext) -> Result<(), DictationFfiError> {
+        self.with_controller(|controller| {
+            controller.set_language_context(CoreLanguageContext::new(
+                context.active_keyboard_language,
+                context.platform_input_language,
+                context.manual_override,
+            ));
             Ok(())
         })
     }

@@ -6,10 +6,22 @@ BIOME ?= biome
 SWIFT ?= swift
 SWIFT_FORMAT ?= xcrun swift-format
 SWIFTLINT ?= swiftlint
+GRADLE ?= gradle
+CARGO_NDK ?= cargo ndk
 CALL_ARGS ?=
+ANDROID_ABI ?= arm64-v8a
+ANDROID_SDK_ROOT ?= $(if $(ANDROID_HOME),$(ANDROID_HOME),/opt/homebrew/share/android-commandlinetools)
+ANDROID_NDK_HOME ?= /opt/homebrew/share/android-ndk
+JAVA_HOME ?= /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
+GRADLE_USER_HOME ?= $(CURDIR)/.gradle-home
+LOCAL_CARGO_NDK := $(CURDIR)/.local/cargo-tools/bin/cargo-ndk
+LOCAL_RUSTUP_HOME := $(CURDIR)/.local/rustup
+LOCAL_CARGO_HOME := $(CURDIR)/.local/cargo
+LOCAL_RUST_TOOLCHAIN_BIN := $(firstword $(wildcard $(CURDIR)/.local/rustup/toolchains/*/bin))
 
 HAS_CARGO_WORKSPACE := $(shell test -f Cargo.toml && printf yes)
 HAS_SWIFT_PACKAGE := $(shell test -f apps/macos/Package.swift && printf yes)
+HAS_ANDROID_PROJECT := $(shell test -f apps/android/settings.gradle.kts && printf yes)
 HAS_WEB := $(shell find apps -maxdepth 3 \( -name package.json -o -name biome.json -o -name biome.jsonc \) 2>/dev/null | head -1)
 SWIFT_PACKAGE_PATH := apps/macos
 SWIFT_SCRATCH_PATH := $(CURDIR)/.build/swiftpm/macos
@@ -20,7 +32,7 @@ SWIFT_SOURCES := $(shell find apps/macos \
 	-path '*/Generated/UniFFI/*' -prune -o \
 	-name '*.swift' -print 2>/dev/null)
 
-.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check macos-ui macos-ui-build macos-e2e-build macos-e2e-launch macos-e2e-smoke macos-e2e-screenshot macos-e2e-stop fix check clippy test deny machete bacon web-check c clean
+.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check android-uniffi android-rust android-build android-check macos-ui macos-ui-build macos-e2e-build macos-e2e-launch macos-e2e-smoke macos-e2e-screenshot macos-e2e-stop fix check clippy test deny machete bacon web-check c clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -81,6 +93,29 @@ swift-test: ## Test the macOS Swift package
 
 swift-check: swift-fmt-check swift-lint swift-build swift-test ## Run the Swift quality gate
 
+android-uniffi: ## Regenerate Android Kotlin UniFFI bindings
+	@if command -v uniffi-bindgen >/dev/null 2>&1; then \
+		uniffi-bindgen generate --language kotlin --no-format --out-dir apps/android/app/src/main/java --crate speech_clerk_ffi crates/ffi/src/speech_clerk.udl; \
+	elif [ -x target/uniffi-cli/debug/uniffi-bindgen ]; then \
+		target/uniffi-cli/debug/uniffi-bindgen generate --language kotlin --no-format --out-dir apps/android/app/src/main/java --crate speech_clerk_ffi crates/ffi/src/speech_clerk.udl; \
+	else \
+		echo "uniffi-bindgen not found; install it or build target/uniffi-cli/debug/uniffi-bindgen"; exit 1; \
+	fi
+
+android-rust: ## Build the Rust FFI library for Android when cargo-ndk is installed
+	@if [ "$(HAS_ANDROID_PROJECT)" != "yes" ]; then echo "No Android project found; skipping Android Rust build"; \
+	elif [ -x "$(LOCAL_CARGO_NDK)" ]; then PATH="$(CURDIR)/.local/cargo-tools/bin:$(LOCAL_RUST_TOOLCHAIN_BIN):$$PATH" RUSTUP_HOME="$(LOCAL_RUSTUP_HOME)" CARGO_HOME="$(LOCAL_CARGO_HOME)" ANDROID_HOME=$(ANDROID_SDK_ROOT) ANDROID_SDK_ROOT=$(ANDROID_SDK_ROOT) ANDROID_NDK_HOME=$(ANDROID_NDK_HOME) cargo ndk -t $(ANDROID_ABI) -o apps/android/app/src/main/jniLibs build -p ffi --release; \
+	elif command -v cargo-ndk >/dev/null 2>&1; then $(CARGO_NDK) -t $(ANDROID_ABI) -o apps/android/app/src/main/jniLibs build -p ffi --release; \
+	else echo "cargo-ndk not installed; skipping Android Rust build"; fi
+
+android-build: ## Build the Android IME when Gradle is installed
+	@if [ "$(HAS_ANDROID_PROJECT)" != "yes" ]; then echo "No Android project found; skipping Android build"; \
+	elif [ ! -f "$(ANDROID_SDK_ROOT)/licenses/android-sdk-license" ]; then echo "Android SDK licenses not accepted; skipping Android build"; \
+	elif command -v $(GRADLE) >/dev/null 2>&1; then JAVA_HOME=$(JAVA_HOME) ANDROID_HOME=$(ANDROID_SDK_ROOT) ANDROID_SDK_ROOT=$(ANDROID_SDK_ROOT) GRADLE_USER_HOME=$(GRADLE_USER_HOME) $(GRADLE) -p apps/android -PspeechClerkAbi=$(ANDROID_ABI) assembleDebug; \
+	else echo "Gradle not installed; skipping Android build"; fi
+
+android-check: android-rust android-build ## Run Android checks available in the local environment
+
 macos-ui: ## Run the macOS UI access tool with CALL_ARGS
 	@sh tools/macos-ui.sh $(CALL_ARGS)
 
@@ -126,7 +161,7 @@ bacon: ## Run the fast Rust feedback loop when bacon is installed
 web-check: ## Run Biome only when web-style project files exist
 	@if [ -n "$(HAS_WEB)" ] && command -v $(BIOME) >/dev/null 2>&1; then $(BIOME) check .; else echo "No Biome-managed web app found; skipping web check"; fi
 
-c: fmt-check toml-check check clippy test deny machete swift-check web-check ## Run the full local quality gate
+c: fmt-check toml-check check clippy test deny machete swift-check android-check web-check ## Run the full local quality gate
 
 clean: ## Remove local build artifacts
 	@if [ "$(HAS_CARGO_WORKSPACE)" = "yes" ]; then $(CARGO) clean; else echo "No Cargo workspace found; skipping cargo clean"; fi
