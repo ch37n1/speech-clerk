@@ -60,6 +60,13 @@ public enum ModelPackCatalog {
     }
 
     private static func bundledModelPacksRootURL() -> URL? {
+        if let appResourceURL = Bundle.main.resourceURL {
+            let appResources = appResourceURL.appendingPathComponent("ModelPacks")
+            if FileManager.default.fileExists(atPath: appResources.path) {
+                return appResources
+            }
+        }
+
         if let resourceURL = Bundle.module.resourceURL {
             let copiedResources =
                 resourceURL

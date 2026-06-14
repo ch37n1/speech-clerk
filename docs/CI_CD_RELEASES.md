@@ -118,6 +118,17 @@ The release workflow should decode the keystore during the job, build a signed
 release APK, upload the APK, and remove the decoded keystore before the job
 finishes. The keystore file and passwords must never be committed.
 
+Create `ANDROID_RELEASE_KEYSTORE_BASE64` from the binary keystore without adding
+line wrapping where possible:
+
+```sh
+base64 -i release.keystore | tr -d '\n'
+```
+
+Android may warn that the APK is from an unknown source when installed outside
+the Play Store. That warning is expected for V1; the user must explicitly allow
+installation from the chosen browser or file manager.
+
 ## Repository-Specific Build Targets
 
 Phase 5 should add or standardize these Make targets:
@@ -134,6 +145,23 @@ Expected outputs:
 .build/dist/SpeechClerk-macos.zip
 .build/dist/SpeechClerk-android.apk
 ```
+
+Local usage:
+
+```sh
+make macos-package
+
+ANDROID_RELEASE_KEYSTORE=/path/to/release.keystore \
+ANDROID_RELEASE_KEYSTORE_PASSWORD=... \
+ANDROID_RELEASE_KEY_ALIAS=... \
+ANDROID_RELEASE_KEY_PASSWORD=... \
+make android-release
+```
+
+`make release-artifacts` runs both targets and is the command used by GitHub
+Actions. The Android target requires the same signing environment locally that
+CI receives from GitHub Secrets; it must not fall back to debug signing for a
+release APK.
 
 `make macos-package` should build the Rust FFI library, build the macOS app, put
 it in a real `.app` bundle, include the required native libraries/resources, and
@@ -168,6 +196,16 @@ The workflow should:
   prerelease with clobbered assets.
 - For `v*` tags, create or update the matching GitHub Release with the same
   assets.
+
+The implemented workflow lives at
+`.github/workflows/release-artifacts.yml`. It keeps `.github/workflows/ci.yml`
+as the pull-request and `main` quality gate, then runs the same quality gate
+before publishing release artifacts from `main` and `v*` tag pushes.
+
+The uploaded macOS ZIP contains `Speech Clerk.app`, bundled app resources, and
+the Rust FFI dylib. The app is intentionally unsigned and unnotarized for V1.
+Gatekeeper will warn on first launch; the expected install path is to extract
+the ZIP, right click `Speech Clerk.app`, choose `Open`, and accept the warning.
 
 ## Model Packs
 
