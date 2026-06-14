@@ -13,12 +13,32 @@ MODEL_PACK ?=
 ANDROID_ABI ?= arm64-v8a
 ANDROID_SDK_ROOT ?= $(if $(ANDROID_HOME),$(ANDROID_HOME),/opt/homebrew/share/android-commandlinetools)
 ANDROID_NDK_HOME ?= /opt/homebrew/share/android-ndk
-JAVA_HOME ?= /opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home
+ANDROID_JAVA_HOME := $(firstword $(wildcard /opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home))
+JAVA_HOME ?= $(if $(ANDROID_JAVA_HOME),$(ANDROID_JAVA_HOME),/opt/homebrew/opt/openjdk/libexec/openjdk.jdk/Contents/Home)
 GRADLE_USER_HOME ?= $(CURDIR)/.gradle-home
+ANDROID_GRADLE_ENV = JAVA_HOME=$(JAVA_HOME) ANDROID_HOME=$(ANDROID_SDK_ROOT) ANDROID_SDK_ROOT=$(ANDROID_SDK_ROOT) GRADLE_USER_HOME=$(GRADLE_USER_HOME)
+DIST_DIR ?= $(CURDIR)/.build/dist
 LOCAL_CARGO_NDK := $(CURDIR)/.local/cargo-tools/bin/cargo-ndk
 LOCAL_RUSTUP_HOME := $(CURDIR)/.local/rustup
 LOCAL_CARGO_HOME := $(CURDIR)/.local/cargo
 LOCAL_RUST_TOOLCHAIN_BIN := $(firstword $(wildcard $(CURDIR)/.local/rustup/toolchains/*/bin))
+ANDROID_RELEASE_SIGNING_MISSING :=
+ifeq ($(strip $(ANDROID_RELEASE_KEYSTORE)),)
+ANDROID_RELEASE_SIGNING_MISSING += ANDROID_RELEASE_KEYSTORE
+endif
+ifeq ($(strip $(ANDROID_RELEASE_KEYSTORE_PASSWORD)),)
+ANDROID_RELEASE_SIGNING_MISSING += ANDROID_RELEASE_KEYSTORE_PASSWORD
+endif
+ifeq ($(strip $(ANDROID_RELEASE_KEY_ALIAS)),)
+ANDROID_RELEASE_SIGNING_MISSING += ANDROID_RELEASE_KEY_ALIAS
+endif
+ifeq ($(strip $(ANDROID_RELEASE_KEY_PASSWORD)),)
+ANDROID_RELEASE_SIGNING_MISSING += ANDROID_RELEASE_KEY_PASSWORD
+endif
+export ANDROID_RELEASE_KEYSTORE
+export ANDROID_RELEASE_KEYSTORE_PASSWORD
+export ANDROID_RELEASE_KEY_ALIAS
+export ANDROID_RELEASE_KEY_PASSWORD
 
 HAS_CARGO_WORKSPACE := $(shell test -f Cargo.toml && printf yes)
 HAS_SWIFT_PACKAGE := $(shell test -f apps/macos/Package.swift && printf yes)
@@ -33,7 +53,7 @@ SWIFT_SOURCES := $(shell find apps/macos \
 	-path '*/Generated/UniFFI/*' -prune -o \
 	-name '*.swift' -print 2>/dev/null)
 
-.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check android-uniffi android-rust android-build android-check macos-ui macos-ui-build macos-e2e-build macos-e2e-launch macos-e2e-smoke macos-e2e-screenshot macos-e2e-stop rc-check fix check clippy test deny machete bacon web-check c clean
+.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check android-uniffi android-rust kotlin-fmt kotlin-fmt-check kotlin-lint android-build android-check macos-package android-release release-artifacts macos-ui macos-ui-build macos-e2e-build macos-e2e-launch macos-e2e-smoke macos-e2e-screenshot macos-e2e-stop rc-check fix check clippy test deny machete bacon web-check c clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -49,14 +69,16 @@ install-tools: ## Install optional Rust quality tools
 install-swift-tools: ## Install optional Swift quality tools when Homebrew is available
 	@if command -v brew >/dev/null 2>&1; then brew install swiftlint; else echo "Homebrew not installed; install SwiftLint manually if desired"; fi
 
-fmt: ## Format Rust, TOML, and Swift files
+fmt: ## Format Rust, TOML, Swift, and Kotlin files
 	@if [ "$(HAS_CARGO_WORKSPACE)" = "yes" ]; then $(CARGO) fmt --all; else echo "No Cargo workspace found; skipping rustfmt"; fi
 	@if command -v $(TAPLO) >/dev/null 2>&1; then $(TAPLO) fmt; else echo "taplo not installed; skipping TOML format"; fi
 	@$(MAKE) swift-fmt
+	@$(MAKE) kotlin-fmt
 
-fmt-check: ## Check Rust and Swift formatting
+fmt-check: ## Check Rust, Swift, and Kotlin formatting
 	@if [ "$(HAS_CARGO_WORKSPACE)" = "yes" ]; then $(CARGO) fmt --all -- --check; else echo "No Cargo workspace found; skipping rustfmt"; fi
 	@$(MAKE) swift-fmt-check
+	@$(MAKE) kotlin-fmt-check
 
 toml-fmt: ## Format TOML files
 	@if command -v $(TAPLO) >/dev/null 2>&1; then $(TAPLO) fmt; else echo "taplo not installed; run make install-tools"; fi
@@ -109,13 +131,48 @@ android-rust: ## Build the Rust FFI library for Android when cargo-ndk is instal
 	elif command -v cargo-ndk >/dev/null 2>&1; then $(CARGO_NDK) -t $(ANDROID_ABI) -o apps/android/app/src/main/jniLibs build -p ffi --release; \
 	else echo "cargo-ndk not installed; skipping Android Rust build"; fi
 
+kotlin-fmt: ## Format first-party Android Kotlin files with ktfmt
+	@if [ "$(HAS_ANDROID_PROJECT)" != "yes" ]; then echo "No Android project found; skipping Kotlin format"; \
+	elif command -v $(GRADLE) >/dev/null 2>&1; then $(ANDROID_GRADLE_ENV) $(GRADLE) -p apps/android :app:ktfmtFormat; \
+	else echo "Gradle not installed; skipping Kotlin format"; fi
+
+kotlin-fmt-check: ## Check first-party Android Kotlin formatting with ktfmt
+	@if [ "$(HAS_ANDROID_PROJECT)" != "yes" ]; then echo "No Android project found; skipping Kotlin format check"; \
+	elif command -v $(GRADLE) >/dev/null 2>&1; then $(ANDROID_GRADLE_ENV) $(GRADLE) -p apps/android :app:ktfmtCheck; \
+	else echo "Gradle not installed; skipping Kotlin format check"; fi
+
+kotlin-lint: ## Run Detekt static analysis for first-party Android Kotlin
+	@if [ "$(HAS_ANDROID_PROJECT)" != "yes" ]; then echo "No Android project found; skipping Kotlin lint"; \
+	elif command -v $(GRADLE) >/dev/null 2>&1; then $(ANDROID_GRADLE_ENV) $(GRADLE) -p apps/android :app:detekt; \
+	else echo "Gradle not installed; skipping Kotlin lint"; fi
+
 android-build: ## Build the Android IME when Gradle is installed
 	@if [ "$(HAS_ANDROID_PROJECT)" != "yes" ]; then echo "No Android project found; skipping Android build"; \
 	elif [ ! -f "$(ANDROID_SDK_ROOT)/licenses/android-sdk-license" ]; then echo "Android SDK licenses not accepted; skipping Android build"; \
-	elif command -v $(GRADLE) >/dev/null 2>&1; then JAVA_HOME=$(JAVA_HOME) ANDROID_HOME=$(ANDROID_SDK_ROOT) ANDROID_SDK_ROOT=$(ANDROID_SDK_ROOT) GRADLE_USER_HOME=$(GRADLE_USER_HOME) $(GRADLE) -p apps/android -PspeechClerkAbi=$(ANDROID_ABI) assembleDebug; \
+	elif command -v $(GRADLE) >/dev/null 2>&1; then $(ANDROID_GRADLE_ENV) $(GRADLE) -p apps/android -PspeechClerkAbi=$(ANDROID_ABI) assembleDebug; \
 	else echo "Gradle not installed; skipping Android build"; fi
 
-android-check: android-rust android-build ## Run Android checks available in the local environment
+android-check: android-rust kotlin-fmt-check kotlin-lint android-build ## Run Android checks available in the local environment
+
+macos-package: ## Package the unsigned macOS .app ZIP into .build/dist
+	@DIST_DIR="$(DIST_DIR)" sh tools/package-macos.sh
+
+android-release: ## Build the signed Android release APK into .build/dist
+	@if [ "$(HAS_ANDROID_PROJECT)" != "yes" ]; then echo "No Android project found; cannot build Android release"; exit 1; fi
+	@if [ -n "$(ANDROID_RELEASE_SIGNING_MISSING)" ]; then echo "Missing Android release signing environment:$(ANDROID_RELEASE_SIGNING_MISSING)"; exit 1; fi
+	@if [ ! -x "$(LOCAL_CARGO_NDK)" ] && ! command -v cargo-ndk >/dev/null 2>&1; then echo "cargo-ndk not installed; cannot build Android release"; exit 1; fi
+	@$(MAKE) android-rust
+	@test -f "apps/android/app/src/main/jniLibs/$(ANDROID_ABI)/libspeech_clerk_ffi.so" || { echo "Missing Rust FFI library for $(ANDROID_ABI)"; exit 1; }
+	@if [ ! -f "$(ANDROID_SDK_ROOT)/licenses/android-sdk-license" ]; then echo "Android SDK licenses not accepted; cannot build Android release"; exit 1; fi
+	@mkdir -p "$(DIST_DIR)"
+	@if command -v $(GRADLE) >/dev/null 2>&1; then \
+		$(ANDROID_GRADLE_ENV) $(GRADLE) -p apps/android -PspeechClerkAbi=$(ANDROID_ABI) assembleRelease; \
+	else echo "Gradle not installed; cannot build Android release"; exit 1; fi
+	@cp apps/android/app/build/outputs/apk/release/app-release.apk "$(DIST_DIR)/SpeechClerk-android.apk"
+	@test -s "$(DIST_DIR)/SpeechClerk-android.apk"
+	@echo "$(DIST_DIR)/SpeechClerk-android.apk"
+
+release-artifacts: macos-package android-release ## Build macOS and Android release artifacts
 
 macos-ui: ## Run the macOS UI access tool with CALL_ARGS
 	@sh tools/macos-ui.sh $(CALL_ARGS)

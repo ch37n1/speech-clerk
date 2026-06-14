@@ -25,10 +25,7 @@ object LanguageTags {
     }
 
     fun clean(value: String?): String? {
-        val normalized = value
-            ?.trim()
-            ?.replace('_', '-')
-            ?.takeIf(String::isNotEmpty)
+        val normalized = value?.trim()?.replace('_', '-')?.takeIf(String::isNotEmpty)
         return normalized
     }
 }

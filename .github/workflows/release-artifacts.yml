@@ -1,0 +1,158 @@
+name: Release Artifacts
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release-artifacts:
+    name: Build Release Artifacts
+    runs-on: macos-latest
+
+    env:
+      ANDROID_NDK_VERSION: "27.2.12479018"
+      GRADLE_USER_HOME: ${{ github.workspace }}/.gradle-home
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+          components: clippy, rustfmt
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "platform-tools"
+          yes | sdkmanager --licenses >/dev/null
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.10.2"
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Show tool versions
+        run: |
+          rustc --version
+          cargo --version
+          cargo ndk --version
+          swift --version
+          xcrun swift-format --version
+          gradle --version
+
+      - name: Run quality gate
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}
+        run: make c
+
+      - name: Decode Android release keystore
+        env:
+          ANDROID_RELEASE_KEYSTORE_BASE64: ${{ secrets.ANDROID_RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_RELEASE_KEYSTORE_BASE64" ]; then
+            echo "::error::Missing ANDROID_RELEASE_KEYSTORE_BASE64 secret"
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/android-signing"
+          printf '%s' "$ANDROID_RELEASE_KEYSTORE_BASE64" \
+            | base64 --decode \
+            > "$RUNNER_TEMP/android-signing/release.keystore"
+
+      - name: Build installable artifacts
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_HOME }}
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/${{ env.ANDROID_NDK_VERSION }}
+          ANDROID_RELEASE_KEYSTORE: ${{ runner.temp }}/android-signing/release.keystore
+          ANDROID_RELEASE_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEYSTORE_PASSWORD }}
+          ANDROID_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_RELEASE_KEY_ALIAS }}
+          ANDROID_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_RELEASE_KEY_PASSWORD }}
+        run: make release-artifacts
+
+      - name: Publish GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+
+          notes_file="$RUNNER_TEMP/release-notes.md"
+          if [ "$GITHUB_REF_TYPE" = "branch" ] && [ "$GITHUB_REF_NAME" = "main" ]; then
+            release_tag="nightly"
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git tag -f "$release_tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$release_tag" --force
+
+            {
+              echo "Nightly installable artifacts for ${GITHUB_SHA}."
+              echo
+              echo "The macOS app is unsigned and unnotarized; use right-click Open on first launch."
+              echo "The Android APK is signed with the repository release keystore."
+            } > "$notes_file"
+
+            if gh release view "$release_tag" >/dev/null 2>&1; then
+              gh release edit "$release_tag" \
+                --title "nightly" \
+                --notes-file "$notes_file" \
+                --prerelease
+            else
+              gh release create "$release_tag" \
+                --target "$GITHUB_SHA" \
+                --title "nightly" \
+                --notes-file "$notes_file" \
+                --prerelease
+            fi
+          elif [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            release_tag="$GITHUB_REF_NAME"
+
+            {
+              echo "Installable Speech Clerk artifacts for ${release_tag}."
+              echo
+              echo "The macOS app is unsigned and unnotarized; use right-click Open on first launch."
+              echo "The Android APK is signed with the repository release keystore."
+            } > "$notes_file"
+
+            if gh release view "$release_tag" >/dev/null 2>&1; then
+              gh release edit "$release_tag" \
+                --title "$release_tag" \
+                --notes-file "$notes_file"
+            else
+              gh release create "$release_tag" \
+                --target "$GITHUB_SHA" \
+                --title "$release_tag" \
+                --notes-file "$notes_file"
+            fi
+          else
+            echo "Unsupported ref: $GITHUB_REF_TYPE/$GITHUB_REF_NAME" >&2
+            exit 1
+          fi
+
+          gh release upload "$release_tag" \
+            .build/dist/SpeechClerk-macos.zip \
+            .build/dist/SpeechClerk-android.apk \
+            --clobber
+
+      - name: Remove decoded Android keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/android-signing/release.keystore"

@@ -1,6 +1,12 @@
 // swift-tools-version: 6.0
 
+import Foundation
 import PackageDescription
+
+let rustLibraryDirectory =
+    ProcessInfo.processInfo.environment["SPEECH_CLERK_RUST_TARGET_DIR"] ?? "../../target/debug"
+let ffiRuntimeSearchPath =
+    ProcessInfo.processInfo.environment["SPEECH_CLERK_FFI_RPATH"] ?? rustLibraryDirectory
 
 let uniffiSwiftSettings: [SwiftSetting] = [
     .unsafeFlags([
@@ -10,10 +16,10 @@ let uniffiSwiftSettings: [SwiftSetting] = [
 
 let ffiLinkerSettings: [LinkerSetting] = [
     .unsafeFlags([
-        "-L", "../../target/debug",
+        "-L", rustLibraryDirectory,
         "-lspeech_clerk_ffi",
         "-Xlinker", "-rpath",
-        "-Xlinker", "../../target/debug",
+        "-Xlinker", ffiRuntimeSearchPath,
         "-Xlinker", "-sectcreate",
         "-Xlinker", "__TEXT",
         "-Xlinker", "__info_plist",

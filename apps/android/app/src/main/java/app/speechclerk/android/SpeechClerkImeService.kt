@@ -33,45 +33,45 @@ class SpeechClerkImeService : InputMethodService() {
         bridge = AndroidDictationBridge(this)
     }
 
-    override fun onCreateInputView(): View = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        gravity = Gravity.CENTER
-        setPadding(dp(12), dp(10), dp(12), dp(10))
-        setBackgroundColor(getColor(R.color.ime_background))
-
-        statusView = TextView(context).apply {
+    override fun onCreateInputView(): View =
+        LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setTextColor(getColor(R.color.ime_muted_text))
-            textSize = 14f
-            text = getString(R.string.status_idle)
-            contentDescription = text
-        }
-        addView(
-            statusView,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-            )
-        )
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            setBackgroundColor(getColor(R.color.ime_background))
 
-        micButton = Button(context).apply {
-            minHeight = dp(52)
-            setAllCaps(false)
-            text = getString(R.string.mic_button_label)
-            contentDescription = getString(R.string.mic_button_accessibility)
-            setOnClickListener { toggleRecording() }
+            statusView =
+                TextView(context).apply {
+                    gravity = Gravity.CENTER
+                    setTextColor(getColor(R.color.ime_muted_text))
+                    textSize = 14f
+                    text = getString(R.string.status_idle)
+                    contentDescription = text
+                }
+            addView(
+                statusView,
+                LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                ),
+            )
+
+            micButton =
+                Button(context).apply {
+                    minHeight = dp(52)
+                    setAllCaps(false)
+                    text = getString(R.string.mic_button_label)
+                    contentDescription = getString(R.string.mic_button_accessibility)
+                    setOnClickListener { toggleRecording() }
+                }
+            addView(
+                micButton,
+                LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, dp(58)).apply {
+                    topMargin = dp(8)
+                },
+            )
+            updateMicButton()
         }
-        addView(
-            micButton,
-            LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(58),
-            ).apply {
-                topMargin = dp(8)
-            }
-        )
-        updateMicButton()
-    }
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
@@ -115,10 +115,12 @@ class SpeechClerkImeService : InputMethodService() {
     }
 
     private fun startRecording() {
-        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+        if (
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) !=
+                PackageManager.PERMISSION_GRANTED
+        ) {
             startActivity(
-                Intent(this, PermissionActivity::class.java)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                Intent(this, PermissionActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
             setStatus(getString(R.string.status_mic_permission))
             return
@@ -145,8 +147,7 @@ class SpeechClerkImeService : InputMethodService() {
             audioCapture.stop()
             try {
                 bridge.cancelRecording()
-            } catch (_: Exception) {
-            }
+            } catch (_: Exception) {}
             setStatus(getString(R.string.status_error))
             return
         }
@@ -160,14 +161,15 @@ class SpeechClerkImeService : InputMethodService() {
         audioCapture.stop()
         setStatus(getString(R.string.status_transcribing))
 
-        val transcript = try {
-            bridge.stopRecording()
-        } catch (_: Exception) {
-            isRecording = false
-            updateMicButton()
-            setStatus(getString(R.string.status_error))
-            return
-        }
+        val transcript =
+            try {
+                bridge.stopRecording()
+            } catch (_: Exception) {
+                isRecording = false
+                updateMicButton()
+                setStatus(getString(R.string.status_error))
+                return
+            }
 
         isRecording = false
         updateMicButton()
@@ -240,8 +242,7 @@ class SpeechClerkImeService : InputMethodService() {
                 audioCapture.stop()
                 try {
                     bridge.cancelRecording()
-                } catch (_: Exception) {
-                } finally {
+                } catch (_: Exception) {} finally {
                     isRecording = false
                     updateMicButton()
                 }
@@ -255,25 +256,28 @@ class SpeechClerkImeService : InputMethodService() {
             return
         }
 
-        micButton.text = if (isRecording) {
-            getString(R.string.stop_button_label)
-        } else {
-            getString(R.string.mic_button_label)
-        }
-        micButton.contentDescription = if (isRecording) {
-            getString(R.string.stop_button_accessibility)
-        } else {
-            getString(R.string.mic_button_accessibility)
-        }
-        micButton.backgroundTintList = ColorStateList.valueOf(
-            getColor(
-                if (isRecording) {
-                    R.color.ime_button_recording
-                } else {
-                    R.color.ime_button
-                }
+        micButton.text =
+            if (isRecording) {
+                getString(R.string.stop_button_label)
+            } else {
+                getString(R.string.mic_button_label)
+            }
+        micButton.contentDescription =
+            if (isRecording) {
+                getString(R.string.stop_button_accessibility)
+            } else {
+                getString(R.string.mic_button_accessibility)
+            }
+        micButton.backgroundTintList =
+            ColorStateList.valueOf(
+                getColor(
+                    if (isRecording) {
+                        R.color.ime_button_recording
+                    } else {
+                        R.color.ime_button
+                    }
+                )
             )
-        )
         micButton.setTextColor(getColor(R.color.ime_button_text))
     }
 
@@ -284,6 +288,5 @@ class SpeechClerkImeService : InputMethodService() {
         }
     }
 
-    private fun dp(value: Int): Int =
-        (value * resources.displayMetrics.density).toInt()
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()
 }

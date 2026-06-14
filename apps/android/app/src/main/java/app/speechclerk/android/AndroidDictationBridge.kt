@@ -10,9 +10,8 @@ import java.io.File
 
 final class AndroidDictationBridge(context: Context) {
     private val appContext = context.applicationContext
-    private val controller = DictationController(
-        DictationConfig(ModelPackStore.modelPacksDir(appContext).absolutePath)
-    )
+    private val controller =
+        DictationController(DictationConfig(ModelPackStore.modelPacksDir(appContext).absolutePath))
 
     init {
         configureOnnxRuntimePath()
@@ -28,11 +27,7 @@ final class AndroidDictationBridge(context: Context) {
         manualOverride: String?,
     ) {
         controller.setLanguageContext(
-            LanguageContext(
-                activeKeyboardLanguage,
-                platformInputLanguage,
-                manualOverride,
-            )
+            LanguageContext(activeKeyboardLanguage, platformInputLanguage, manualOverride)
         )
     }
 

@@ -38,4 +38,5 @@ The full quality gate runs Rust formatting, TOML formatting when `taplo` is
 installed, `cargo check`, strict `clippy`, Rust tests, dependency/security
 checks when `cargo-deny` is installed, dead dependency checks when
 `cargo-machete` is installed, Swift formatting/build/tests for the macOS app,
-SwiftLint when installed, and Biome only when a web app is introduced.
+SwiftLint when installed, Kotlin formatting/static analysis for the Android app,
+and Biome only when a web app is introduced.
