@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
 /// Default manifest filename inside a model pack.
@@ -160,6 +161,7 @@ impl ModelManifest {
 
     fn validate_files(&self, pack_dir: &Path) -> Result<(), ModelPackError> {
         self.validate_metadata()?;
+        self.validate_runtime_file_contract()?;
 
         for file in &self.files {
             let path = pack_dir.join(&file.path);
@@ -167,6 +169,54 @@ impl ModelManifest {
                 return Err(ModelPackError::Validation(format!(
                     "declared model file is missing: {}",
                     path.display()
+                )));
+            }
+
+            if let Some(expected) = normalized_sha256(file)? {
+                let actual = sha256_file_hex(&path)?;
+                if actual != expected {
+                    return Err(ModelPackError::Validation(format!(
+                        "checksum mismatch for {}: expected {expected}, got {actual}",
+                        file.path
+                    )));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validate_runtime_file_contract(&self) -> Result<(), ModelPackError> {
+        if self.runtime != "onnx" {
+            return Ok(());
+        }
+
+        let has_single_model = self.files.iter().any(|file| file.role == "model");
+        let has_single_tokenizer = self.files.iter().any(|file| file.role == "tokenizer");
+        let has_parakeet_split = self.files.iter().any(|file| file.role == "encoder")
+            && self.files.iter().any(|file| file.role == "decoder_joint")
+            && self.files.iter().any(|file| file.role == "preprocessor")
+            && self.files.iter().any(|file| file.role == "vocab")
+            && self.files.iter().any(|file| file.role == "config");
+
+        if !(has_parakeet_split || has_single_model && has_single_tokenizer) {
+            return Err(ModelPackError::Validation(
+                "onnx model packs must declare either model/tokenizer files or encoder/decoder_joint/preprocessor/vocab/config files".to_owned(),
+            ));
+        }
+
+        for file in &self.files {
+            let Some(checksum) = &file.sha256 else {
+                return Err(ModelPackError::Validation(format!(
+                    "onnx file {} must declare sha256",
+                    file.path
+                )));
+            };
+
+            if checksum.trim().is_empty() {
+                return Err(ModelPackError::Validation(format!(
+                    "onnx file {} must declare sha256",
+                    file.path
                 )));
             }
         }
@@ -283,6 +333,223 @@ fn validate_relative_file_path(path: &str) -> Result<(), ModelPackError> {
     }
 
     Ok(())
+}
+
+fn normalized_sha256(file: &ModelFile) -> Result<Option<String>, ModelPackError> {
+    let Some(checksum) = &file.sha256 else {
+        return Ok(None);
+    };
+    let checksum = checksum.trim().to_ascii_lowercase();
+
+    if checksum.is_empty() {
+        return Ok(None);
+    }
+
+    if checksum.len() != 64
+        || !checksum
+            .chars()
+            .all(|character| character.is_ascii_hexdigit())
+    {
+        return Err(ModelPackError::Validation(format!(
+            "sha256 for {} must be 64 lowercase or uppercase hex characters",
+            file.path
+        )));
+    }
+
+    Ok(Some(checksum))
+}
+
+/// Return the SHA-256 digest for a local file as lowercase hex.
+pub fn sha256_file_hex(path: &Path) -> Result<String, ModelPackError> {
+    let mut file = fs::File::open(path).map_err(|source| {
+        ModelPackError::Io(format!("failed to open {}: {source}", path.display()))
+    })?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 16 * 1024];
+
+    loop {
+        let read = file.read(&mut buffer).map_err(|source| {
+            ModelPackError::Io(format!("failed to read {}: {source}", path.display()))
+        })?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(hex_lower(&hasher.finalize()))
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(bytes.len() * 2);
+
+    for byte in bytes {
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
+    }
+
+    output
+}
+
+#[derive(Debug, Clone)]
+struct Sha256 {
+    state: [u32; 8],
+    buffer: [u8; 64],
+    buffer_len: usize,
+    bit_len: u64,
+}
+
+impl Sha256 {
+    fn new() -> Self {
+        Self {
+            state: [
+                0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+                0x5be0cd19,
+            ],
+            buffer: [0; 64],
+            buffer_len: 0,
+            bit_len: 0,
+        }
+    }
+
+    fn update(&mut self, mut input: &[u8]) {
+        self.bit_len = self.bit_len.wrapping_add((input.len() as u64) * 8);
+
+        if self.buffer_len > 0 {
+            let remaining = 64 - self.buffer_len;
+            let to_copy = remaining.min(input.len());
+            self.buffer[self.buffer_len..self.buffer_len + to_copy]
+                .copy_from_slice(&input[..to_copy]);
+            self.buffer_len += to_copy;
+            input = &input[to_copy..];
+
+            if self.buffer_len == 64 {
+                let block = self.buffer;
+                self.compress(&block);
+                self.buffer_len = 0;
+            }
+        }
+
+        while input.len() >= 64 {
+            let mut block = [0_u8; 64];
+            block.copy_from_slice(&input[..64]);
+            self.compress(&block);
+            input = &input[64..];
+        }
+
+        if !input.is_empty() {
+            self.buffer[..input.len()].copy_from_slice(input);
+            self.buffer_len = input.len();
+        }
+    }
+
+    fn finalize(mut self) -> [u8; 32] {
+        self.buffer[self.buffer_len] = 0x80;
+        self.buffer_len += 1;
+
+        if self.buffer_len > 56 {
+            for byte in &mut self.buffer[self.buffer_len..] {
+                *byte = 0;
+            }
+            let block = self.buffer;
+            self.compress(&block);
+            self.buffer_len = 0;
+        }
+
+        for byte in &mut self.buffer[self.buffer_len..56] {
+            *byte = 0;
+        }
+        self.buffer[56..64].copy_from_slice(&self.bit_len.to_be_bytes());
+
+        let block = self.buffer;
+        self.compress(&block);
+
+        let mut output = [0_u8; 32];
+        for (index, value) in self.state.iter().enumerate() {
+            output[index * 4..index * 4 + 4].copy_from_slice(&value.to_be_bytes());
+        }
+        output
+    }
+
+    fn compress(&mut self, block: &[u8; 64]) {
+        const K: [u32; 64] = [
+            0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+            0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+            0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+            0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+            0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+            0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+            0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+            0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+            0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+            0xc67178f2,
+        ];
+        let mut schedule = [0_u32; 64];
+
+        for (index, word) in schedule.iter_mut().enumerate().take(16) {
+            let start = index * 4;
+            *word = u32::from_be_bytes([
+                block[start],
+                block[start + 1],
+                block[start + 2],
+                block[start + 3],
+            ]);
+        }
+
+        for index in 16..64 {
+            let small_sigma0 = schedule[index - 15].rotate_right(7)
+                ^ schedule[index - 15].rotate_right(18)
+                ^ (schedule[index - 15] >> 3);
+            let small_sigma1 = schedule[index - 2].rotate_right(17)
+                ^ schedule[index - 2].rotate_right(19)
+                ^ (schedule[index - 2] >> 10);
+            schedule[index] = schedule[index - 16]
+                .wrapping_add(small_sigma0)
+                .wrapping_add(schedule[index - 7])
+                .wrapping_add(small_sigma1);
+        }
+
+        let mut a = self.state[0];
+        let mut b = self.state[1];
+        let mut c = self.state[2];
+        let mut d = self.state[3];
+        let mut e = self.state[4];
+        let mut f = self.state[5];
+        let mut g = self.state[6];
+        let mut h = self.state[7];
+
+        for index in 0..64 {
+            let big_sigma1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let choose = (e & f) ^ ((!e) & g);
+            let temp1 = h
+                .wrapping_add(big_sigma1)
+                .wrapping_add(choose)
+                .wrapping_add(K[index])
+                .wrapping_add(schedule[index]);
+            let big_sigma0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = big_sigma0.wrapping_add(majority);
+
+            h = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+
+        self.state[0] = self.state[0].wrapping_add(a);
+        self.state[1] = self.state[1].wrapping_add(b);
+        self.state[2] = self.state[2].wrapping_add(c);
+        self.state[3] = self.state[3].wrapping_add(d);
+        self.state[4] = self.state[4].wrapping_add(e);
+        self.state[5] = self.state[5].wrapping_add(f);
+        self.state[6] = self.state[6].wrapping_add(g);
+        self.state[7] = self.state[7].wrapping_add(h);
+    }
 }
 
 fn extract_string(input: &str, key: &str) -> Result<String, ModelPackError> {
@@ -500,7 +767,7 @@ fn find_enclosed_end(
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelManifest, ModelPack, ModelPackError};
+    use super::{ModelManifest, ModelPack, ModelPackError, sha256_file_hex};
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -529,6 +796,39 @@ mod tests {
       "role": "fake-config",
       "path": "fake_asr.txt",
       "sha256": ""
+    }
+  ]
+}"#;
+
+    const ONNX_MANIFEST_TEMPLATE: &str = r#"{
+  "schemaVersion": 1,
+  "modelId": "parakeet-tdt-0.6b-v3-int8",
+  "displayName": "Parakeet TDT 0.6B V3 INT8",
+  "runtime": "onnx",
+  "quantization": "int8",
+  "audio": {
+    "sampleRateHz": 16000,
+    "channels": 1,
+    "sampleFormat": "f32"
+  },
+  "languages": ["en"],
+  "capabilities": {
+    "chunked": true,
+    "streaming": false,
+    "timestamps": true,
+    "punctuation": true,
+    "languageDetection": true
+  },
+  "files": [
+    {
+      "role": "model",
+      "path": "model.onnx",
+      "sha256": "__MODEL_SHA__"
+    },
+    {
+      "role": "tokenizer",
+      "path": "tokenizer.model",
+      "sha256": "__TOKENIZER_SHA__"
     }
   ]
 }"#;
@@ -578,6 +878,117 @@ mod tests {
         assert!(matches!(result, Err(ModelPackError::Validation(_))));
         let _ = fs::remove_dir_all(&dir);
         Ok(())
+    }
+
+    #[test]
+    fn computes_sha256_file_hex() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = unique_temp_dir("speech-clerk-model-pack-sha")?;
+        fs::create_dir_all(&dir)?;
+        let path = dir.join("digest.txt");
+        fs::write(&path, "abc")?;
+
+        let digest = sha256_file_hex(&path)?;
+
+        assert_eq!(
+            digest,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn validates_onnx_file_checksums() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = create_onnx_pack()?;
+
+        let pack = ModelPack::load_from_dir(&dir)?;
+
+        assert_eq!(pack.manifest().runtime, "onnx");
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn validates_split_parakeet_onnx_assets() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = unique_temp_dir("speech-clerk-model-pack-parakeet-split")?;
+        fs::create_dir_all(&dir)?;
+        let encoder_path = dir.join("encoder-model.int8.onnx");
+        let decoder_path = dir.join("decoder_joint-model.int8.onnx");
+        let preprocessor_path = dir.join("nemo128.onnx");
+        let vocab_path = dir.join("vocab.txt");
+        let config_path = dir.join("config.json");
+        fs::write(&encoder_path, "encoder fixture")?;
+        fs::write(&decoder_path, "decoder fixture")?;
+        fs::write(&preprocessor_path, "preprocessor fixture")?;
+        fs::write(&vocab_path, "<unk> 0\n")?;
+        fs::write(&config_path, "{\"model_type\":\"nemo-conformer-tdt\"}")?;
+        let manifest = format!(
+            r#"{{
+  "schemaVersion": 1,
+  "modelId": "parakeet-tdt-0.6b-v3-int8",
+  "displayName": "Parakeet TDT 0.6B V3 INT8",
+  "runtime": "onnx",
+  "quantization": "int8",
+  "audio": {{
+    "sampleRateHz": 16000,
+    "channels": 1,
+    "sampleFormat": "f32"
+  }},
+  "languages": ["en"],
+  "capabilities": {{
+    "chunked": true,
+    "streaming": false,
+    "timestamps": true,
+    "punctuation": true,
+    "languageDetection": true
+  }},
+	  "files": [
+	    {{"role": "encoder", "path": "encoder-model.int8.onnx", "sha256": "{}"}},
+	    {{"role": "decoder_joint", "path": "decoder_joint-model.int8.onnx", "sha256": "{}"}},
+	    {{"role": "preprocessor", "path": "nemo128.onnx", "sha256": "{}"}},
+	    {{"role": "vocab", "path": "vocab.txt", "sha256": "{}"}},
+	    {{"role": "config", "path": "config.json", "sha256": "{}"}}
+	  ]
+	}}"#,
+            sha256_file_hex(&encoder_path)?,
+            sha256_file_hex(&decoder_path)?,
+            sha256_file_hex(&preprocessor_path)?,
+            sha256_file_hex(&vocab_path)?,
+            sha256_file_hex(&config_path)?
+        );
+        fs::write(dir.join("manifest.json"), manifest)?;
+
+        let pack = ModelPack::load_from_dir(&dir)?;
+
+        assert_eq!(pack.manifest().files.len(), 5);
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_onnx_checksum_mismatch() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = create_onnx_pack()?;
+        fs::write(dir.join("model.onnx"), "changed")?;
+
+        let result = ModelPack::load_from_dir(&dir);
+
+        assert!(matches!(result, Err(ModelPackError::Validation(_))));
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    fn create_onnx_pack() -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let dir = unique_temp_dir("speech-clerk-model-pack-onnx")?;
+        fs::create_dir_all(&dir)?;
+        let model_path = dir.join("model.onnx");
+        let tokenizer_path = dir.join("tokenizer.model");
+        fs::write(&model_path, "onnx fixture")?;
+        fs::write(&tokenizer_path, "tokenizer fixture")?;
+        let manifest = ONNX_MANIFEST_TEMPLATE
+            .replace("__MODEL_SHA__", &sha256_file_hex(&model_path)?)
+            .replace("__TOKENIZER_SHA__", &sha256_file_hex(&tokenizer_path)?);
+        fs::write(dir.join("manifest.json"), manifest)?;
+        Ok(dir)
     }
 
     fn unique_temp_dir(prefix: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {

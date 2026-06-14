@@ -1,6 +1,38 @@
 //! Backend-neutral ASR contracts.
 
 use core::fmt;
+use std::path::PathBuf;
+
+/// Backend-neutral model asset declared by a model-pack manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelAsset {
+    /// Role declared by the manifest, such as `model` or `tokenizer`.
+    pub role: String,
+    /// Relative path declared by the manifest.
+    pub path: String,
+    /// Absolute local path resolved from the loaded model pack.
+    pub absolute_path: PathBuf,
+    /// Optional SHA-256 checksum from the manifest.
+    pub sha256: Option<String>,
+}
+
+impl ModelAsset {
+    /// Create a backend-neutral model asset.
+    #[must_use]
+    pub fn new(
+        role: impl Into<String>,
+        path: impl Into<String>,
+        absolute_path: impl Into<PathBuf>,
+        sha256: Option<String>,
+    ) -> Self {
+        Self {
+            role: role.into(),
+            path: path.into(),
+            absolute_path: absolute_path.into(),
+            sha256,
+        }
+    }
+}
 
 /// Backend-neutral model loading configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +45,10 @@ pub struct ModelConfig {
     pub runtime: String,
     /// Languages advertised by the model pack.
     pub languages: Vec<String>,
+    /// Directory containing the loaded model pack.
+    pub pack_dir: PathBuf,
+    /// Files declared by the model-pack manifest.
+    pub files: Vec<ModelAsset>,
 }
 
 impl ModelConfig {
@@ -29,7 +65,17 @@ impl ModelConfig {
             display_name: display_name.into(),
             runtime: runtime.into(),
             languages,
+            pack_dir: PathBuf::new(),
+            files: Vec::new(),
         }
+    }
+
+    /// Attach manifest-resolved pack directory and assets.
+    #[must_use]
+    pub fn with_assets(mut self, pack_dir: impl Into<PathBuf>, files: Vec<ModelAsset>) -> Self {
+        self.pack_dir = pack_dir.into();
+        self.files = files;
+        self
     }
 }
 

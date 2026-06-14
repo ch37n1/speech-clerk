@@ -8,7 +8,7 @@ struct SpeechClerkMacApp: App {
         WindowGroup {
             ContentView()
                 .environmentObject(viewModel)
-                .frame(minWidth: 520, minHeight: 460)
+                .frame(minWidth: 560, minHeight: 620)
         }
         .commands {
             CommandGroup(replacing: .newItem) {}

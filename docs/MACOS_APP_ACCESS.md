@@ -92,6 +92,9 @@ Current identifiers:
 - `replacement-pattern-field`
 - `replacement-value-field`
 - `apply-replacement-button`
+- `benchmark-run-button`
+- `benchmark-status`
+- `benchmark-results`
 - `record-toggle-button`
 - `cancel-recording-button`
 - `last-transcript`

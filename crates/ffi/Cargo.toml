@@ -10,6 +10,8 @@ name = "speech_clerk_ffi"
 crate-type = ["rlib", "cdylib", "staticlib"]
 
 [dependencies]
+asr-api = { path = "../asr-api" }
+asr-onnx = { path = "../asr-onnx" }
 dictation-core = { path = "../dictation-core" }
 postprocess = { path = "../postprocess" }
 uniffi = "0.31.1"

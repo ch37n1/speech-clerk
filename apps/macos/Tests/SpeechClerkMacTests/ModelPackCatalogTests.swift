@@ -7,6 +7,7 @@ struct ModelPackCatalogTestRunner {
         let tests = ModelPackCatalogTests()
         try tests.loadsValidModelManifestsSortedByDisplayName()
         try tests.ignoresEntriesWithoutValidManifestIdentity()
+        try tests.prefersOnnxModelsForDefaultSelection()
     }
 }
 
@@ -64,6 +65,38 @@ struct ModelPackCatalogTests {
         try expectEqual(models, [ModelPackOption(id: "valid-model", displayName: "Valid Model")])
     }
 
+    func prefersOnnxModelsForDefaultSelection() throws {
+        let rootURL = try makeTemporaryDirectory()
+        defer {
+            try? FileManager.default.removeItem(at: rootURL)
+        }
+
+        try writeManifest(
+            rootURL: rootURL,
+            directoryName: "fake",
+            modelID: "fake-model",
+            displayName: "A Fake Model",
+            runtime: "fake"
+        )
+        try writeManifest(
+            rootURL: rootURL,
+            directoryName: "onnx",
+            modelID: "onnx-model",
+            displayName: "Z ONNX Model",
+            runtime: "onnx"
+        )
+
+        let models = ModelPackCatalog.loadModels(from: rootURL)
+
+        try expectEqual(
+            models,
+            [
+                ModelPackOption(id: "onnx-model", displayName: "Z ONNX Model", runtime: "onnx"),
+                ModelPackOption(id: "fake-model", displayName: "A Fake Model", runtime: "fake"),
+            ]
+        )
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("SpeechClerkMacTests-\(UUID().uuidString)", isDirectory: true)
@@ -75,7 +108,8 @@ struct ModelPackCatalogTests {
         rootURL: URL,
         directoryName: String,
         modelID: String,
-        displayName: String
+        displayName: String,
+        runtime: String = "unknown"
     ) throws {
         let modelURL = rootURL.appendingPathComponent(directoryName, isDirectory: true)
         try FileManager.default.createDirectory(at: modelURL, withIntermediateDirectories: true)
@@ -83,7 +117,8 @@ struct ModelPackCatalogTests {
         let manifest = """
             {
               "modelId": "\(modelID)",
-              "displayName": "\(displayName)"
+              "displayName": "\(displayName)",
+              "runtime": "\(runtime)"
             }
             """
         try Data(manifest.utf8).write(to: modelURL.appendingPathComponent("manifest.json"))

@@ -8,9 +8,13 @@ use std::sync::Mutex;
 
 uniffi::include_scaffolding!("speech_clerk");
 
+use asr_api::{
+    AsrCapabilities, AsrEngine, AsrError, ModelConfig, PcmAudio, Transcript as AsrTranscript,
+};
+use asr_onnx::OrtAsrEngine;
 use dictation_core::{
     DictationConfig as CoreDictationConfig, DictationController as CoreDictationController,
-    LanguageMode as CoreLanguageMode,
+    FakeAsrEngine, LanguageMode as CoreLanguageMode,
 };
 use postprocess::ReplacementRule as CoreReplacementRule;
 
@@ -100,7 +104,10 @@ impl DictationController {
     pub fn new(config: DictationConfig) -> Self {
         let core_config = CoreDictationConfig::new(config.model_packs_dir);
         Self {
-            inner: Mutex::new(CoreDictationController::new(core_config)),
+            inner: Mutex::new(CoreDictationController::with_engine(
+                core_config,
+                Box::<RuntimeDispatchAsrEngine>::default(),
+            )),
         }
     }
 
@@ -186,6 +193,78 @@ impl DictationController {
             .lock()
             .map_err(|_| DictationFfiError::ControllerUnavailable)?;
         operation(&mut controller).map_err(|_error| DictationFfiError::Core)
+    }
+}
+
+#[derive(Debug, Default)]
+enum ActiveEngine {
+    #[default]
+    None,
+    Fake,
+    Onnx,
+}
+
+#[derive(Debug, Default)]
+struct RuntimeDispatchAsrEngine {
+    fake: FakeAsrEngine,
+    onnx: OrtAsrEngine,
+    active: ActiveEngine,
+}
+
+impl AsrEngine for RuntimeDispatchAsrEngine {
+    fn load(&mut self, config: &ModelConfig) -> Result<(), AsrError> {
+        match config.runtime.as_str() {
+            "fake" => {
+                self.fake.load(config)?;
+                self.active = ActiveEngine::Fake;
+                Ok(())
+            }
+            "onnx" => {
+                self.onnx.load(config)?;
+                self.active = ActiveEngine::Onnx;
+                Ok(())
+            }
+            runtime => Err(AsrError::LoadFailed(format!(
+                "unsupported runtime {runtime}"
+            ))),
+        }
+    }
+
+    fn transcribe(
+        &mut self,
+        audio: &PcmAudio,
+        options: &asr_api::TranscribeOptions,
+    ) -> Result<AsrTranscript, AsrError> {
+        match self.active {
+            ActiveEngine::Fake => self.fake.transcribe(audio, options),
+            ActiveEngine::Onnx => self.onnx.transcribe(audio, options),
+            ActiveEngine::None => Err(AsrError::TranscriptionFailed(
+                "no runtime engine has been loaded".to_owned(),
+            )),
+        }
+    }
+
+    fn capabilities(&self) -> AsrCapabilities {
+        match self.active {
+            ActiveEngine::Fake => self.fake.capabilities(),
+            ActiveEngine::Onnx => self.onnx.capabilities(),
+            ActiveEngine::None => AsrCapabilities {
+                supports_chunked: true,
+                supports_streaming: false,
+                supports_punctuation: true,
+                supports_language_detection: false,
+            },
+        }
+    }
+
+    fn unload(&mut self) -> Result<(), AsrError> {
+        match self.active {
+            ActiveEngine::Fake => self.fake.unload()?,
+            ActiveEngine::Onnx => self.onnx.unload()?,
+            ActiveEngine::None => {}
+        }
+        self.active = ActiveEngine::None;
+        Ok(())
     }
 }
 

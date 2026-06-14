@@ -103,6 +103,34 @@ struct ContentView: View {
                 .accessibilityIdentifier("apply-replacement-button")
             }
 
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Benchmark")
+                    .font(.headline)
+
+                HStack {
+                    Button {
+                        viewModel.runBenchmark()
+                    } label: {
+                        Label("Run Benchmark", systemImage: "speedometer")
+                    }
+                    .accessibilityIdentifier("benchmark-run-button")
+                    .disabled(viewModel.selectedModelID.isEmpty || viewModel.benchmarkIsRunning)
+
+                    Text(viewModel.benchmarkStatusText)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("benchmark-status")
+                }
+
+                if !viewModel.benchmarkResultsText.isEmpty {
+                    Text(viewModel.benchmarkResultsText)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("benchmark-results")
+                }
+            }
+
             Spacer(minLength: 8)
 
             HStack {

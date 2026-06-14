@@ -3,9 +3,11 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use asr_api::{AsrCapabilities, AsrEngine, AsrError, ModelConfig, PcmAudio, Transcript};
-use audio_pipeline::{AudioBuffer, AudioFrame, AudioPipelineError};
-use model_pack::{ModelManifest, ModelPack, ModelPackError};
+use asr_api::{
+    AsrCapabilities, AsrEngine, AsrError, ModelAsset, ModelConfig, PcmAudio, Transcript,
+};
+use audio_pipeline::{AudioFrame, AudioPipelineError, AudioProcessor, AudioProcessorConfig};
+use model_pack::{ModelPack, ModelPackError};
 use postprocess::{PostProcessor, ReplacementRule};
 
 /// Product-level dictation configuration.
@@ -106,7 +108,8 @@ pub struct DictationController {
     engine: Box<dyn AsrEngine>,
     model_packs_dir: PathBuf,
     loaded_model: Option<ModelPack>,
-    audio_buffer: AudioBuffer,
+    audio_processor_config: AudioProcessorConfig,
+    audio_processor: Option<AudioProcessor>,
     post_processor: PostProcessor,
     language_mode: LanguageMode,
     state: RecordingState,
@@ -126,7 +129,8 @@ impl DictationController {
             engine,
             model_packs_dir: config.model_packs_dir,
             loaded_model: None,
-            audio_buffer: AudioBuffer::new(),
+            audio_processor_config: AudioProcessorConfig::default(),
+            audio_processor: None,
             post_processor: PostProcessor::with_replacements(config.replacement_rules),
             language_mode: LanguageMode::Auto,
             state: RecordingState::Idle,
@@ -145,7 +149,7 @@ impl DictationController {
             )));
         }
 
-        let config = model_config_from_manifest(pack.manifest());
+        let config = model_config_from_pack(&pack);
         self.engine.load(&config)?;
         self.loaded_model = Some(pack);
         Ok(())
@@ -163,7 +167,7 @@ impl DictationController {
             ));
         }
 
-        self.audio_buffer.clear();
+        self.audio_processor = Some(AudioProcessor::start(self.audio_processor_config.clone())?);
         self.state = RecordingState::Recording;
         Ok(())
     }
@@ -182,7 +186,10 @@ impl DictationController {
         }
 
         let frame = AudioFrame::new(samples, sample_rate_hz, channels)?;
-        self.audio_buffer.push_frame(frame)?;
+        let processor = self.audio_processor.as_ref().ok_or_else(|| {
+            DictationError::InvalidState("audio processor has not started".to_owned())
+        })?;
+        processor.try_push_frame(frame)?;
         Ok(())
     }
 
@@ -195,20 +202,42 @@ impl DictationController {
         }
 
         self.state = RecordingState::Idle;
+        let Some(processor) = self.audio_processor.take() else {
+            return Err(DictationError::InvalidState(
+                "audio processor has not started".to_owned(),
+            ));
+        };
+        let chunks = processor.finish()?;
 
-        if self.audio_buffer.is_empty() {
+        if chunks.is_empty() {
             return Ok(None);
         }
 
-        let chunk = self.audio_buffer.drain_chunk();
-        let audio = PcmAudio {
-            samples: chunk.samples,
-            sample_rate_hz: chunk.sample_rate_hz,
+        let options = self.transcribe_options_for_current_state();
+        let mut transcript_text = String::new();
+        let mut transcript_language = None;
+
+        for chunk in chunks {
+            let audio = PcmAudio {
+                samples: chunk.samples,
+                sample_rate_hz: chunk.sample_rate_hz,
+            };
+            let transcript = self.engine.transcribe(&audio, &options)?;
+            if transcript_language.is_none() {
+                transcript_language = transcript.language.clone();
+            }
+            if !transcript.text.trim().is_empty() {
+                if !transcript_text.is_empty() {
+                    transcript_text.push(' ');
+                }
+                transcript_text.push_str(transcript.text.trim());
+            }
+        }
+
+        let transcript = Transcript {
+            text: self.post_processor.process(&transcript_text),
+            language: transcript_language,
         };
-        let mut transcript = self
-            .engine
-            .transcribe(&audio, &self.transcribe_options_for_current_state())?;
-        transcript.text = self.post_processor.process(&transcript.text);
         Ok(Some(transcript))
     }
 
@@ -220,7 +249,9 @@ impl DictationController {
             ));
         }
 
-        self.audio_buffer.clear();
+        if let Some(processor) = self.audio_processor.take() {
+            processor.cancel()?;
+        }
         self.state = RecordingState::Idle;
         Ok(())
     }
@@ -333,13 +364,28 @@ impl AsrEngine for FakeAsrEngine {
     }
 }
 
-fn model_config_from_manifest(manifest: &ModelManifest) -> ModelConfig {
+fn model_config_from_pack(pack: &ModelPack) -> ModelConfig {
+    let manifest = pack.manifest();
+    let files = manifest
+        .files
+        .iter()
+        .map(|file| {
+            ModelAsset::new(
+                file.role.clone(),
+                file.path.clone(),
+                pack.path().join(&file.path),
+                file.sha256.clone(),
+            )
+        })
+        .collect();
+
     ModelConfig::new(
         manifest.model_id.clone(),
         manifest.display_name.clone(),
         manifest.runtime.clone(),
         manifest.languages.clone(),
     )
+    .with_assets(pack.path().to_path_buf(), files)
 }
 
 #[cfg(test)]
@@ -415,7 +461,7 @@ mod tests {
         controller.load_model("fake-local")?;
         controller.set_language_mode(LanguageMode::Manual("ru".to_owned()));
         controller.start_recording()?;
-        controller.push_audio(vec![0.1; 8_000], 16_000, 1)?;
+        controller.push_audio(vec![0.1; 16_000], 16_000, 1)?;
         let transcript = controller.stop_recording()?;
 
         assert!(matches!(

@@ -306,13 +306,28 @@ Every model is installed as a local model pack.
 
   "files": [
     {
-      "role": "model",
-      "path": "model.onnx",
+      "role": "encoder",
+      "path": "encoder-model.int8.onnx",
       "sha256": "..."
     },
     {
-      "role": "tokenizer",
-      "path": "tokenizer.model",
+      "role": "decoder_joint",
+      "path": "decoder_joint-model.int8.onnx",
+      "sha256": "..."
+    },
+    {
+      "role": "preprocessor",
+      "path": "nemo128.onnx",
+      "sha256": "..."
+    },
+    {
+      "role": "vocab",
+      "path": "vocab.txt",
+      "sha256": "..."
+    },
+    {
+      "role": "config",
+      "path": "config.json",
       "sha256": "..."
     }
   ]
@@ -320,6 +335,8 @@ Every model is installed as a local model pack.
 ```
 
 The app loads models only through this manifest.
+Development fixture packs may use the smaller `model` and `tokenizer` roles for
+plumbing tests, but production Parakeet packs use the split assets above.
 
 No model assumptions should be hard-coded in macOS or Android code.
 

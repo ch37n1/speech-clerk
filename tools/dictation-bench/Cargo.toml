@@ -1,0 +1,24 @@
+[package]
+name = "dictation-bench"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+asr-api = { path = "../../crates/asr-api" }
+asr-onnx = { path = "../../crates/asr-onnx" }
+audio-pipeline = { path = "../../crates/audio-pipeline" }
+libc = "0.2.178"
+model-pack = { path = "../../crates/model-pack" }
+postprocess = { path = "../../crates/postprocess" }
+
+[lints.rust]
+missing_docs = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+unsafe_code = "allow"
+
+[lints.clippy]
+expect_used = "deny"
+panic = "deny"
+unwrap_used = "deny"

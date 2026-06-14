@@ -1,11 +1,14 @@
 [workspace]
 members = [
     "crates/asr-api",
+    "crates/asr-onnx",
     "crates/audio-pipeline",
     "crates/dictation-core",
     "crates/ffi",
     "crates/model-pack",
     "crates/postprocess",
+    "tools/dictation-bench",
+    "tools/model-packager",
 ]
 resolver = "3"
 
