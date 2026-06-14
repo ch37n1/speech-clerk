@@ -6,7 +6,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
 
-use model_pack::sha256_file_hex;
+use model_pack::{ModelFile, ModelPack, sha256_file_hex};
 
 const DEFAULT_MODEL_ID: &str = "parakeet-tdt-0.6b-v3-int8";
 const DEFAULT_DISPLAY_NAME: &str = "Parakeet TDT 0.6B V3 INT8";
@@ -21,6 +21,7 @@ fn main() {
 fn run() -> Result<(), PackageError> {
     match PackageCommand::parse(env::args().skip(1))? {
         PackageCommand::ParakeetSplit(config) => package_parakeet_split(config),
+        PackageCommand::Validate(config) => validate_model_pack(config),
     }
 }
 
@@ -54,9 +55,27 @@ fn package_parakeet_split(config: ParakeetSplitConfig) -> Result<(), PackageErro
     Ok(())
 }
 
+fn validate_model_pack(config: ValidateConfig) -> Result<(), PackageError> {
+    let pack = ModelPack::load_from_dir(&config.pack_dir)
+        .map_err(|error| PackageError::Message(error.to_string()))?;
+    let manifest = pack.manifest();
+    let total_size_bytes = declared_files_total_size_bytes(pack.path(), &manifest.files)?;
+
+    println!(
+        "validated model_id={} runtime={} quantization={} files={} bytes={}",
+        manifest.model_id,
+        manifest.runtime,
+        manifest.quantization,
+        manifest.files.len(),
+        total_size_bytes
+    );
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum PackageCommand {
     ParakeetSplit(ParakeetSplitConfig),
+    Validate(ValidateConfig),
 }
 
 impl PackageCommand {
@@ -65,6 +84,7 @@ impl PackageCommand {
 
         match command.as_str() {
             "parakeet-split" => Ok(Self::ParakeetSplit(ParakeetSplitConfig::parse(args)?)),
+            "validate" => Ok(Self::Validate(ValidateConfig::parse(args)?)),
             _ => Err(usage_error()),
         }
     }
@@ -104,6 +124,28 @@ impl ParakeetSplitConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidateConfig {
+    pack_dir: PathBuf,
+}
+
+impl ValidateConfig {
+    fn parse(mut args: impl Iterator<Item = String>) -> Result<Self, PackageError> {
+        let mut pack_dir = None;
+
+        while let Some(flag) = args.next() {
+            match flag.as_str() {
+                "--pack" => pack_dir = Some(PathBuf::from(next_value(&mut args, "--pack")?)),
+                _ => return Err(usage_error()),
+            }
+        }
+
+        Ok(Self {
+            pack_dir: pack_dir.ok_or_else(usage_error)?,
+        })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct PackAsset {
     role: &'static str,
@@ -135,6 +177,25 @@ fn copy_asset(source_dir: &Path, pack_dir: &Path, file_name: &str) -> Result<(),
         ))
     })?;
     Ok(())
+}
+
+fn declared_files_total_size_bytes(
+    pack_dir: &Path,
+    files: &[ModelFile],
+) -> Result<u64, PackageError> {
+    let mut total_size_bytes = 0_u64;
+
+    for file in files {
+        let path = pack_dir.join(&file.path);
+        let metadata = fs::metadata(&path).map_err(|source| {
+            PackageError::Io(format!("failed to stat {}: {source}", path.display()))
+        })?;
+        total_size_bytes = total_size_bytes
+            .checked_add(metadata.len())
+            .ok_or_else(|| PackageError::Message("model-pack size overflowed u64".to_owned()))?;
+    }
+
+    Ok(total_size_bytes)
 }
 
 fn render_manifest(
@@ -196,7 +257,7 @@ fn next_value(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<Str
 
 fn usage_error() -> PackageError {
     PackageError::Message(
-        "usage: model-packager parakeet-split --source <export-dir> --output <model-pack-root> [--model-id parakeet-tdt-0.6b-v3-int8] [--display-name \"Parakeet TDT 0.6B V3 INT8\"]"
+        "usage: model-packager parakeet-split --source <export-dir> --output <model-pack-root> [--model-id parakeet-tdt-0.6b-v3-int8] [--display-name \"Parakeet TDT 0.6B V3 INT8\"]\n       model-packager validate --pack <model-pack-dir>"
             .to_owned(),
     )
 }
@@ -231,3 +292,33 @@ impl fmt::Display for PackageError {
 }
 
 impl std::error::Error for PackageError {}
+
+#[cfg(test)]
+mod tests {
+    use super::{PackageCommand, ValidateConfig};
+    use std::path::PathBuf;
+
+    #[test]
+    fn parses_validate_command() -> Result<(), Box<dyn std::error::Error>> {
+        let command = PackageCommand::parse(
+            ["validate", "--pack", "./ModelPacks/fake-local"]
+                .into_iter()
+                .map(str::to_owned),
+        )?;
+
+        assert_eq!(
+            command,
+            PackageCommand::Validate(ValidateConfig {
+                pack_dir: PathBuf::from("./ModelPacks/fake-local"),
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_validate_command_without_pack_path() {
+        let result = PackageCommand::parse(["validate"].into_iter().map(str::to_owned));
+
+        assert!(result.is_err());
+    }
+}

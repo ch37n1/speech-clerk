@@ -6,6 +6,8 @@ Swift conventions and tooling are documented in `../../docs/SWIFT_GUIDE.md`.
 App inspection and control are documented in `../../docs/MACOS_APP_ACCESS.md`.
 E2E smoke and manual verification are documented in
 `../../docs/MACOS_E2E_TESTING.md`.
+Release-candidate install, benchmark, and known-limitations checks are
+documented in `../../docs/RELEASE_CANDIDATE.md`.
 
 Run from the repository root:
 

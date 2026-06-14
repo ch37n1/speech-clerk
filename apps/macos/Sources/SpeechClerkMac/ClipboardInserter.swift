@@ -29,6 +29,7 @@ final class ActiveApplicationTracker {
     }
 }
 
+@MainActor
 enum ClipboardInserter {
     static var hasKeyboardPastePermission: Bool {
         AXIsProcessTrusted()
@@ -48,7 +49,7 @@ enum ClipboardInserter {
         }
 
         let pasteboard = NSPasteboard.general
-        let previousString = pasteboard.string(forType: .string)
+        let previousSnapshot = ClipboardSnapshot.capture(from: pasteboard)
 
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
@@ -60,16 +61,14 @@ enum ClipboardInserter {
             targetApplication?.activate(options: [.activateIgnoringOtherApps])
         }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 180_000_000)
             sendCommandV()
 
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                if pasteboard.changeCount == transcriptChangeCount {
-                    pasteboard.clearContents()
-                    if let previousString {
-                        pasteboard.setString(previousString, forType: .string)
-                    }
-                }
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            let pasteboard = NSPasteboard.general
+            if pasteboard.changeCount == transcriptChangeCount {
+                previousSnapshot.restore(to: pasteboard)
             }
         }
 
@@ -87,4 +86,55 @@ enum ClipboardInserter {
         keyDown?.post(tap: .cghidEventTap)
         keyUp?.post(tap: .cghidEventTap)
     }
+}
+
+private struct ClipboardSnapshot: Sendable {
+    let items: [ClipboardItem]
+
+    static func capture(from pasteboard: NSPasteboard) -> Self {
+        let copiedItems =
+            pasteboard.pasteboardItems?
+            .compactMap(copyItem)
+            ?? []
+        return Self(items: copiedItems)
+    }
+
+    func restore(to pasteboard: NSPasteboard) {
+        pasteboard.clearContents()
+        if !items.isEmpty {
+            pasteboard.writeObjects(items.map(\.pasteboardItem))
+        }
+    }
+
+    private static func copyItem(_ item: NSPasteboardItem) -> ClipboardItem? {
+        var representations: [ClipboardRepresentation] = []
+        for pasteboardType in item.types {
+            let type = pasteboardType.rawValue
+            if let data = item.data(forType: pasteboardType) {
+                representations.append(ClipboardRepresentation(type: type, data: data))
+            }
+        }
+
+        return representations.isEmpty ? nil : ClipboardItem(representations: representations)
+    }
+}
+
+private struct ClipboardItem: Sendable {
+    let representations: [ClipboardRepresentation]
+
+    var pasteboardItem: NSPasteboardItem {
+        let item = NSPasteboardItem()
+        for representation in representations {
+            item.setData(
+                representation.data,
+                forType: NSPasteboard.PasteboardType(representation.type)
+            )
+        }
+        return item
+    }
+}
+
+private struct ClipboardRepresentation: Sendable {
+    let type: String
+    let data: Data
 }

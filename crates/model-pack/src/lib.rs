@@ -5,8 +5,12 @@ use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 
+use tracing::info;
+
 /// Default manifest filename inside a model pack.
 pub const MANIFEST_FILE_NAME: &str = "manifest.json";
+/// Maximum V1 ONNX model-pack size accepted by release-candidate builds.
+pub const MAX_V1_ONNX_PACK_BYTES: u64 = 6 * 1024 * 1024 * 1024;
 
 /// Parsed local model pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -162,6 +166,7 @@ impl ModelManifest {
     fn validate_files(&self, pack_dir: &Path) -> Result<(), ModelPackError> {
         self.validate_metadata()?;
         self.validate_runtime_file_contract()?;
+        let mut total_size_bytes = 0_u64;
 
         for file in &self.files {
             let path = pack_dir.join(&file.path);
@@ -171,6 +176,14 @@ impl ModelManifest {
                     path.display()
                 )));
             }
+            let metadata = fs::metadata(&path).map_err(|source| {
+                ModelPackError::Io(format!("failed to stat {}: {source}", path.display()))
+            })?;
+            total_size_bytes = total_size_bytes
+                .checked_add(metadata.len())
+                .ok_or_else(|| {
+                    ModelPackError::Validation("model-pack size overflowed u64".to_owned())
+                })?;
 
             if let Some(expected) = normalized_sha256(file)? {
                 let actual = sha256_file_hex(&path)?;
@@ -183,12 +196,33 @@ impl ModelManifest {
             }
         }
 
+        if self.runtime == "onnx" {
+            validate_onnx_pack_size(total_size_bytes)?;
+        }
+
+        info!(
+            model_id = %self.model_id,
+            runtime = %self.runtime,
+            quantization = %self.quantization,
+            file_count = self.files.len(),
+            total_size_bytes,
+            pack_dir = %pack_dir.display(),
+            "validated model pack"
+        );
+
         Ok(())
     }
 
     fn validate_runtime_file_contract(&self) -> Result<(), ModelPackError> {
         if self.runtime != "onnx" {
             return Ok(());
+        }
+
+        if !self.quantization.eq_ignore_ascii_case("int8") {
+            return Err(ModelPackError::Validation(format!(
+                "V1 ONNX model packs must be INT8 quantized, got {}",
+                self.quantization
+            )));
         }
 
         let has_single_model = self.files.iter().any(|file| file.role == "model");
@@ -223,6 +257,16 @@ impl ModelManifest {
 
         Ok(())
     }
+}
+
+fn validate_onnx_pack_size(total_size_bytes: u64) -> Result<(), ModelPackError> {
+    if total_size_bytes > MAX_V1_ONNX_PACK_BYTES {
+        return Err(ModelPackError::Validation(format!(
+            "ONNX model pack is too large for V1 release-candidate install: {total_size_bytes} bytes exceeds {MAX_V1_ONNX_PACK_BYTES} bytes"
+        )));
+    }
+
+    Ok(())
 }
 
 /// Audio format metadata in a model-pack manifest.
@@ -767,7 +811,10 @@ fn find_enclosed_end(
 
 #[cfg(test)]
 mod tests {
-    use super::{ModelManifest, ModelPack, ModelPackError, sha256_file_hex};
+    use super::{
+        MAX_V1_ONNX_PACK_BYTES, ModelManifest, ModelPack, ModelPackError, sha256_file_hex,
+        validate_onnx_pack_size,
+    };
     use std::fs;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -906,6 +953,27 @@ mod tests {
         assert_eq!(pack.manifest().runtime, "onnx");
         let _ = fs::remove_dir_all(&dir);
         Ok(())
+    }
+
+    #[test]
+    fn rejects_onnx_pack_without_v1_int8_quantization() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = create_onnx_pack()?;
+        let manifest = fs::read_to_string(dir.join("manifest.json"))?
+            .replace("\"quantization\": \"int8\"", "\"quantization\": \"fp16\"");
+        fs::write(dir.join("manifest.json"), manifest)?;
+
+        let result = ModelPack::load_from_dir(&dir);
+
+        assert!(matches!(result, Err(ModelPackError::Validation(_))));
+        let _ = fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_onnx_pack_size_above_release_candidate_limit() {
+        let result = validate_onnx_pack_size(MAX_V1_ONNX_PACK_BYTES + 1);
+
+        assert!(matches!(result, Err(ModelPackError::Validation(_))));
     }
 
     #[test]

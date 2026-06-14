@@ -13,8 +13,8 @@ struct ContentView: View {
 
                 Spacer()
 
-                Label(viewModel.statusText, systemImage: viewModel.isRecording ? "record.circle" : "checkmark.circle")
-                    .foregroundStyle(viewModel.isRecording ? .red : .secondary)
+                Label(viewModel.statusText, systemImage: statusSymbolName)
+                    .foregroundStyle(statusColor)
                     .accessibilityIdentifier("app-status")
             }
 
@@ -32,6 +32,11 @@ struct ContentView: View {
                 .accessibilityIdentifier("model-picker")
                 .labelsHidden()
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                Text(viewModel.modelStateText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("model-state")
 
                 Button {
                     viewModel.loadSelectedModel()
@@ -146,6 +151,7 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(viewModel.isRecording ? .red : .accentColor)
                 .accessibilityIdentifier("record-toggle-button")
+                .accessibilityLabel(viewModel.isRecording ? "Stop dictation" : "Start dictation")
                 .disabled(!viewModel.canRecord)
 
                 Button {
@@ -154,6 +160,7 @@ struct ContentView: View {
                     Label("Cancel", systemImage: "xmark")
                 }
                 .accessibilityIdentifier("cancel-recording-button")
+                .accessibilityLabel("Cancel dictation")
                 .disabled(!viewModel.isRecording)
 
                 Spacer()
@@ -172,5 +179,35 @@ struct ContentView: View {
         .onAppear {
             viewModel.loadSelectedModel()
         }
+    }
+
+    private var statusSymbolName: String {
+        if viewModel.isRecording {
+            return "record.circle.fill"
+        }
+
+        if ["error", "blocked", "missing", "no model", "failed"].contains(where: {
+            viewModel.statusText.localizedCaseInsensitiveContains($0)
+        }) {
+            return "exclamationmark.triangle.fill"
+        }
+
+        if viewModel.statusText == "Transcribing" {
+            return "waveform"
+        }
+
+        return "checkmark.circle"
+    }
+
+    private var statusColor: Color {
+        if viewModel.isRecording {
+            return .red
+        }
+
+        if statusSymbolName == "exclamationmark.triangle.fill" {
+            return .orange
+        }
+
+        return .secondary
     }
 }

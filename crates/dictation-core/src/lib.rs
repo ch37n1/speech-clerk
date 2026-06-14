@@ -9,14 +9,17 @@ use asr_api::{
 use audio_pipeline::{AudioFrame, AudioPipelineError, AudioProcessor, AudioProcessorConfig};
 use model_pack::{ModelPack, ModelPackError};
 use postprocess::{PostProcessor, ReplacementRule};
+use tracing::{debug, info, trace, warn};
 
 /// Product-level dictation configuration.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DictationConfig {
     /// Directory containing installed model-pack directories.
     pub model_packs_dir: PathBuf,
     /// Initial deterministic replacement rules.
     pub replacement_rules: Vec<ReplacementRule>,
+    /// Audio worker and chunking settings.
+    pub audio_processor_config: AudioProcessorConfig,
 }
 
 impl DictationConfig {
@@ -26,6 +29,7 @@ impl DictationConfig {
         Self {
             model_packs_dir: model_packs_dir.into(),
             replacement_rules: Vec::new(),
+            audio_processor_config: AudioProcessorConfig::default(),
         }
     }
 
@@ -33,6 +37,16 @@ impl DictationConfig {
     #[must_use]
     pub fn with_replacement_rules(mut self, replacement_rules: Vec<ReplacementRule>) -> Self {
         self.replacement_rules = replacement_rules;
+        self
+    }
+
+    /// Override audio queue and chunking settings.
+    #[must_use]
+    pub fn with_audio_processor_config(
+        mut self,
+        audio_processor_config: AudioProcessorConfig,
+    ) -> Self {
+        self.audio_processor_config = audio_processor_config;
         self
     }
 }
@@ -178,7 +192,7 @@ impl DictationController {
             engine,
             model_packs_dir: config.model_packs_dir,
             loaded_model: None,
-            audio_processor_config: AudioProcessorConfig::default(),
+            audio_processor_config: config.audio_processor_config,
             audio_processor: None,
             post_processor: PostProcessor::with_replacements(config.replacement_rules),
             language_context: LanguageContext::default(),
@@ -201,6 +215,12 @@ impl DictationController {
 
         let config = model_config_from_pack(&pack);
         self.engine.load(&config)?;
+        info!(
+            model_id = %config.model_id,
+            runtime = %config.runtime,
+            display_name = %config.display_name,
+            "loaded dictation model"
+        );
         self.loaded_model = Some(pack);
         Ok(())
     }
@@ -219,6 +239,10 @@ impl DictationController {
 
         self.audio_processor = Some(AudioProcessor::start(self.audio_processor_config.clone())?);
         self.state = RecordingState::Recording;
+        debug!(
+            queue_capacity = self.audio_processor_config.queue_capacity,
+            "recording started"
+        );
         Ok(())
     }
 
@@ -239,6 +263,12 @@ impl DictationController {
         let processor = self.audio_processor.as_ref().ok_or_else(|| {
             DictationError::InvalidState("audio processor has not started".to_owned())
         })?;
+        trace!(
+            sample_count = frame.samples.len(),
+            sample_rate_hz = frame.sample_rate_hz,
+            channels = frame.channels,
+            "pushing captured audio frame"
+        );
         processor.try_push_frame(frame)?;
         Ok(())
     }
@@ -258,8 +288,10 @@ impl DictationController {
             ));
         };
         let chunks = processor.finish()?;
+        info!(chunk_count = chunks.len(), "recording stopped");
 
         if chunks.is_empty() {
+            warn!("recording produced no finalized speech chunks");
             return Ok(None);
         }
 
@@ -289,6 +321,12 @@ impl DictationController {
             language: transcript_language,
         };
 
+        info!(
+            text_length = transcript.text.len(),
+            language = transcript.language.as_deref().unwrap_or("unknown"),
+            "transcription completed"
+        );
+
         if let Some(language) = &transcript.language {
             self.last_used_language = Some(language.clone());
         }
@@ -308,6 +346,7 @@ impl DictationController {
             processor.cancel()?;
         }
         self.state = RecordingState::Idle;
+        debug!("recording canceled");
         Ok(())
     }
 
@@ -466,6 +505,7 @@ mod tests {
     use super::{
         DictationConfig, DictationController, DictationError, LanguageContext, LanguageMode,
     };
+    use audio_pipeline::AudioProcessorConfig;
     use postprocess::ReplacementRule;
     use std::fs;
     use std::path::PathBuf;
@@ -526,6 +566,24 @@ mod tests {
         let result = controller.push_audio(vec![0.0], 16_000, 1);
 
         assert!(matches!(result, Err(DictationError::InvalidState(_))));
+    }
+
+    #[test]
+    fn rejects_invalid_audio_processor_tuning() -> Result<(), Box<dyn std::error::Error>> {
+        let root = create_fake_pack()?;
+        let config =
+            DictationConfig::new(&root).with_audio_processor_config(AudioProcessorConfig {
+                queue_capacity: 0,
+                ..AudioProcessorConfig::default()
+            });
+        let mut controller = DictationController::new(config);
+
+        controller.load_model("fake-local")?;
+        let result = controller.start_recording();
+
+        assert!(matches!(result, Err(DictationError::Audio(_))));
+        let _ = fs::remove_dir_all(&root);
+        Ok(())
     }
 
     #[test]

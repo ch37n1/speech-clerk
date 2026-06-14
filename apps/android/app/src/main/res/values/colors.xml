@@ -3,6 +3,7 @@
     <color name="ime_background">#101418</color>
     <color name="ime_button">#D6E4FF</color>
     <color name="ime_button_recording">#FFD7D7</color>
+    <color name="ime_button_text">#101418</color>
     <color name="ime_text">#F3F6FA</color>
     <color name="ime_muted_text">#AEB7C2</color>
 </resources>

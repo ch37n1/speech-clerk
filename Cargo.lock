@@ -62,11 +62,15 @@ dependencies = [
  "ort",
  "ort-sys",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]
 name = "audio-pipeline"
 version = "0.1.0"
+dependencies = [
+ "tracing",
+]
 
 [[package]]
 name = "autocfg"
@@ -153,6 +157,7 @@ dependencies = [
  "audio-pipeline",
  "model-pack",
  "postprocess",
+ "tracing",
 ]
 
 [[package]]
@@ -185,6 +190,7 @@ dependencies = [
  "asr-onnx",
  "dictation-core",
  "postprocess",
+ "tracing",
  "uniffi",
 ]
 
@@ -327,6 +333,9 @@ checksum = "68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a"
 [[package]]
 name = "model-pack"
 version = "0.1.0"
+dependencies = [
+ "tracing",
+]
 
 [[package]]
 name = "model-packager"

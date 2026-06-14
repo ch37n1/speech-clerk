@@ -3,8 +3,9 @@
 //! The public surface in this crate mirrors `speech_clerk.udl`, keeping platform
 //! code on controller-level operations instead of ASR or model runtime details.
 
-use std::fmt;
-use std::sync::Mutex;
+use std::fmt::{self, Write as _};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, Once};
 
 uniffi::include_scaffolding!("speech_clerk");
 
@@ -17,6 +18,14 @@ use dictation_core::{
     FakeAsrEngine, LanguageContext as CoreLanguageContext, LanguageMode as CoreLanguageMode,
 };
 use postprocess::ReplacementRule as CoreReplacementRule;
+use tracing::field::{Field, Visit};
+use tracing::level_filters::LevelFilter;
+use tracing::subscriber::Interest;
+use tracing::{Event, Level, Metadata, Subscriber, warn};
+
+const LOG_ENV_VAR: &str = "SPEECH_CLERK_LOG";
+
+static INIT_TRACING: Once = Once::new();
 
 /// FFI-friendly dictation configuration.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,6 +138,8 @@ impl DictationController {
     /// Create a controller with the Phase 1 fake ASR backend.
     #[must_use]
     pub fn new(config: DictationConfig) -> Self {
+        init_tracing_from_env();
+
         let core_config = CoreDictationConfig::new(config.model_packs_dir);
         Self {
             inner: Mutex::new(CoreDictationController::with_engine(
@@ -231,7 +242,161 @@ impl DictationController {
             .inner
             .lock()
             .map_err(|_| DictationFfiError::ControllerUnavailable)?;
-        operation(&mut controller).map_err(|_error| DictationFfiError::Core)
+        operation(&mut controller).map_err(|error| {
+            warn!(error = %error, "dictation core operation failed across FFI");
+            DictationFfiError::Core
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+impl LogLevel {
+    fn allows(self, level: &Level) -> bool {
+        match *level {
+            Level::ERROR => true,
+            Level::WARN => matches!(self, Self::Warn | Self::Info | Self::Debug | Self::Trace),
+            Level::INFO => matches!(self, Self::Info | Self::Debug | Self::Trace),
+            Level::DEBUG => matches!(self, Self::Debug | Self::Trace),
+            Level::TRACE => matches!(self, Self::Trace),
+        }
+    }
+
+    fn as_filter(self) -> LevelFilter {
+        match self {
+            Self::Error => LevelFilter::ERROR,
+            Self::Warn => LevelFilter::WARN,
+            Self::Info => LevelFilter::INFO,
+            Self::Debug => LevelFilter::DEBUG,
+            Self::Trace => LevelFilter::TRACE,
+        }
+    }
+}
+
+fn parse_log_level(value: &str) -> Option<LogLevel> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "1" | "true" | "yes" | "on" => Some(LogLevel::Info),
+        "error" => Some(LogLevel::Error),
+        "warn" | "warning" => Some(LogLevel::Warn),
+        "info" => Some(LogLevel::Info),
+        "debug" => Some(LogLevel::Debug),
+        "trace" => Some(LogLevel::Trace),
+        "0" | "false" | "no" | "off" | "none" => None,
+        _ => None,
+    }
+}
+
+fn init_tracing_from_env() {
+    INIT_TRACING.call_once(|| {
+        let level = match std::env::var(LOG_ENV_VAR) {
+            Ok(value) => parse_log_level(&value),
+            Err(_) => None,
+        };
+
+        if let Some(level) = level {
+            let _ = tracing::subscriber::set_global_default(StderrTracingSubscriber::new(level));
+        }
+    });
+}
+
+#[derive(Debug)]
+struct StderrTracingSubscriber {
+    level: LogLevel,
+    next_span_id: AtomicU64,
+}
+
+impl StderrTracingSubscriber {
+    fn new(level: LogLevel) -> Self {
+        Self {
+            level,
+            next_span_id: AtomicU64::new(1),
+        }
+    }
+}
+
+impl Subscriber for StderrTracingSubscriber {
+    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+        if self.enabled(metadata) {
+            Interest::always()
+        } else {
+            Interest::never()
+        }
+    }
+
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        self.level.allows(metadata.level())
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        Some(self.level.as_filter())
+    }
+
+    fn new_span(&self, _span: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+        tracing::span::Id::from_u64(self.next_span_id.fetch_add(1, Ordering::Relaxed))
+    }
+
+    fn record(&self, _span: &tracing::span::Id, _values: &tracing::span::Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &tracing::span::Id, _follows: &tracing::span::Id) {}
+
+    fn event(&self, event: &Event<'_>) {
+        if !self.event_enabled(event) {
+            return;
+        }
+
+        let metadata = event.metadata();
+        let mut fields = FieldFormatter::default();
+        event.record(&mut fields);
+
+        let mut output = String::new();
+        let _ = write!(
+            output,
+            "[speech-clerk] {} {}",
+            metadata.level(),
+            metadata.target()
+        );
+        if let Some(file) = metadata.file() {
+            let _ = write!(output, " {file}");
+            if let Some(line) = metadata.line() {
+                let _ = write!(output, ":{line}");
+            }
+        }
+        if !fields.output.is_empty() {
+            let _ = write!(output, " {}", fields.output);
+        }
+
+        eprintln!("{output}");
+    }
+
+    fn enter(&self, _span: &tracing::span::Id) {}
+
+    fn exit(&self, _span: &tracing::span::Id) {}
+}
+
+#[derive(Debug, Default)]
+struct FieldFormatter {
+    output: String,
+}
+
+impl FieldFormatter {
+    fn push(&mut self, field: &Field, value: impl fmt::Debug) {
+        if !self.output.is_empty() {
+            self.output.push(' ');
+        }
+        let _ = write!(self.output, "{}={value:?}", field.name());
+    }
+}
+
+impl Visit for FieldFormatter {
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        self.push(field, value);
     }
 }
 
@@ -316,7 +481,8 @@ pub fn ffi_boundary_name() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::{
-        DictationConfig, DictationController, LanguageMode, ReplacementRule, ffi_boundary_name,
+        DictationConfig, DictationController, LanguageMode, LogLevel, ReplacementRule,
+        ffi_boundary_name, parse_log_level,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -374,6 +540,16 @@ mod tests {
     #[test]
     fn reports_boundary_name() {
         assert_eq!(ffi_boundary_name(), "speech-clerk-ffi");
+    }
+
+    #[test]
+    fn parses_opt_in_log_level() {
+        assert_eq!(parse_log_level(""), Some(LogLevel::Info));
+        assert_eq!(parse_log_level("true"), Some(LogLevel::Info));
+        assert_eq!(parse_log_level("warn"), Some(LogLevel::Warn));
+        assert_eq!(parse_log_level("trace"), Some(LogLevel::Trace));
+        assert_eq!(parse_log_level("off"), None);
+        assert_eq!(parse_log_level("invalid"), None);
     }
 
     fn create_fake_pack() -> Result<PathBuf, Box<dyn std::error::Error>> {

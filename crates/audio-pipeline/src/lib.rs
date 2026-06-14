@@ -5,8 +5,12 @@ use std::collections::VecDeque;
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
 use std::thread::{self, JoinHandle};
 
+use tracing::{debug, warn};
+
 /// V1 internal sample rate.
 pub const INTERNAL_SAMPLE_RATE_HZ: u32 = 16_000;
+/// Release-candidate queue bound for captured platform audio frames.
+pub const RELEASE_CANDIDATE_AUDIO_QUEUE_CAPACITY: usize = 64;
 
 /// Audio pipeline validation and conversion errors.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,17 +213,18 @@ impl Default for ChunkingConfig {
         Self {
             minimum_speech_ms: 700,
             target_min_ms: 5_000,
-            target_max_ms: 15_000,
+            target_max_ms: 12_000,
             max_chunk_ms: 15_000,
             pre_roll_ms: 250,
             post_roll_ms: 500,
-            speech_threshold: 0.001,
+            speech_threshold: 0.002,
         }
     }
 }
 
 impl ChunkingConfig {
-    fn validate(&self) -> Result<(), AudioPipelineError> {
+    /// Validate chunking settings before starting capture.
+    pub fn validate(&self) -> Result<(), AudioPipelineError> {
         if self.minimum_speech_ms == 0 {
             return Err(AudioPipelineError::InvalidChunkingConfig(
                 "minimum_speech_ms must be greater than zero".to_owned(),
@@ -264,6 +269,7 @@ pub struct AudioChunker {
     max_pre_roll_samples: usize,
     minimum_speech_samples: usize,
     target_min_samples: usize,
+    target_max_samples: usize,
     max_chunk_samples: usize,
     post_roll_samples: usize,
 }
@@ -275,6 +281,7 @@ impl AudioChunker {
         let max_pre_roll_samples = config.samples_for_ms(config.pre_roll_ms);
         let minimum_speech_samples = config.samples_for_ms(config.minimum_speech_ms);
         let target_min_samples = config.samples_for_ms(config.target_min_ms);
+        let target_max_samples = config.samples_for_ms(config.target_max_ms);
         let max_chunk_samples = config.samples_for_ms(config.max_chunk_ms);
         let post_roll_samples = config.samples_for_ms(config.post_roll_ms);
 
@@ -287,6 +294,7 @@ impl AudioChunker {
             max_pre_roll_samples,
             minimum_speech_samples,
             target_min_samples,
+            target_max_samples,
             max_chunk_samples,
             post_roll_samples,
         })
@@ -316,7 +324,7 @@ impl AudioChunker {
                 self.trailing_silence_samples += 1;
             }
 
-            if self.active.len() >= self.max_chunk_samples || self.ready_after_post_roll() {
+            if self.ready_after_length_limit() || self.ready_after_post_roll() {
                 chunks.push(self.drain_active_chunk());
             }
         }
@@ -351,6 +359,12 @@ impl AudioChunker {
             && self.trailing_silence_samples >= self.post_roll_samples
     }
 
+    fn ready_after_length_limit(&self) -> bool {
+        self.active.len() >= self.max_chunk_samples
+            || (self.active_speech_samples >= self.minimum_speech_samples
+                && self.active.len() >= self.target_max_samples)
+    }
+
     fn drain_active_chunk(&mut self) -> AudioChunk {
         let samples = core::mem::take(&mut self.active);
         self.active_speech_samples = 0;
@@ -379,9 +393,21 @@ pub struct AudioProcessorConfig {
 impl Default for AudioProcessorConfig {
     fn default() -> Self {
         Self {
-            queue_capacity: 32,
+            queue_capacity: RELEASE_CANDIDATE_AUDIO_QUEUE_CAPACITY,
             chunking: ChunkingConfig::default(),
         }
+    }
+}
+
+impl AudioProcessorConfig {
+    /// Validate queue and chunking settings before worker startup.
+    pub fn validate(&self) -> Result<(), AudioPipelineError> {
+        if self.queue_capacity == 0 {
+            return Err(AudioPipelineError::InvalidChunkingConfig(
+                "queue_capacity must be greater than zero".to_owned(),
+            ));
+        }
+        self.chunking.validate()
     }
 }
 
@@ -395,14 +421,18 @@ pub struct AudioProcessor {
 impl AudioProcessor {
     /// Start a bounded audio processing worker.
     pub fn start(config: AudioProcessorConfig) -> Result<Self, AudioPipelineError> {
-        if config.queue_capacity == 0 {
-            return Err(AudioPipelineError::InvalidChunkingConfig(
-                "queue_capacity must be greater than zero".to_owned(),
-            ));
-        }
-        config.chunking.validate()?;
+        config.validate()?;
 
         let (sender, receiver) = sync_channel(config.queue_capacity);
+        debug!(
+            queue_capacity = config.queue_capacity,
+            minimum_speech_ms = config.chunking.minimum_speech_ms,
+            target_min_ms = config.chunking.target_min_ms,
+            target_max_ms = config.chunking.target_max_ms,
+            max_chunk_ms = config.chunking.max_chunk_ms,
+            speech_threshold = config.chunking.speech_threshold,
+            "starting audio processing worker"
+        );
         let worker = thread::spawn(move || run_audio_worker(receiver, config.chunking));
         Ok(Self {
             sender,
@@ -415,8 +445,14 @@ impl AudioProcessor {
         self.sender
             .try_send(AudioWorkerMessage::Frame(frame))
             .map_err(|error| match error {
-                TrySendError::Full(_) => AudioPipelineError::QueueFull,
-                TrySendError::Disconnected(_) => AudioPipelineError::WorkerStopped,
+                TrySendError::Full(_) => {
+                    warn!("audio processing queue is full; dropping captured frame");
+                    AudioPipelineError::QueueFull
+                }
+                TrySendError::Disconnected(_) => {
+                    warn!("audio processing worker stopped before accepting frame");
+                    AudioPipelineError::WorkerStopped
+                }
             })
     }
 
@@ -471,9 +507,16 @@ fn run_audio_worker(
                 if let Some(chunk) = chunker.finish() {
                     chunks.push(chunk);
                 }
+                debug!(
+                    chunk_count = chunks.len(),
+                    "audio worker finished recording"
+                );
                 return Ok(chunks);
             }
-            AudioWorkerMessage::Cancel => return Ok(Vec::new()),
+            AudioWorkerMessage::Cancel => {
+                debug!("audio worker canceled recording");
+                return Ok(Vec::new());
+            }
         }
     }
 
@@ -532,6 +575,7 @@ mod tests {
     use super::{
         AudioBuffer, AudioChunk, AudioChunker, AudioFrame, AudioPipelineError, AudioProcessor,
         AudioProcessorConfig, ChunkingConfig, INTERNAL_SAMPLE_RATE_HZ,
+        RELEASE_CANDIDATE_AUDIO_QUEUE_CAPACITY,
     };
 
     #[test]
@@ -616,6 +660,34 @@ mod tests {
         assert_eq!(chunks.len(), 1);
         assert_eq!(chunks[0].samples.len(), 32);
         Ok(())
+    }
+
+    #[test]
+    fn chunker_splits_at_target_max_before_hard_max() -> Result<(), AudioPipelineError> {
+        let mut chunker = AudioChunker::new(ChunkingConfig {
+            minimum_speech_ms: 1,
+            target_min_ms: 1,
+            target_max_ms: 2,
+            max_chunk_ms: 5,
+            pre_roll_ms: 0,
+            post_roll_ms: 1,
+            speech_threshold: 0.5,
+        })?;
+
+        let chunks = chunker.push_samples(&[1.0; 40]);
+
+        assert_eq!(chunks[0].samples.len(), 32);
+        Ok(())
+    }
+
+    #[test]
+    fn default_audio_processor_config_uses_release_candidate_queue_bound() {
+        let config = AudioProcessorConfig::default();
+
+        assert_eq!(
+            config.queue_capacity,
+            RELEASE_CANDIDATE_AUDIO_QUEUE_CAPACITY
+        );
     }
 
     #[test]

@@ -3,6 +3,8 @@
 Native Kotlin input method for local dictation.
 
 Manual verification is documented in `../../docs/ANDROID_IME_TESTING.md`.
+Release-candidate install, benchmark, and known-limitations checks are
+documented in `../../docs/RELEASE_CANDIDATE.md`.
 
 The Android shell owns only IME UI, microphone permission, `AudioRecord`
 capture, platform language signals, and text insertion through
@@ -39,6 +41,10 @@ cp /path/to/libonnxruntime.so apps/android/app/src/main/jniLibs/arm64-v8a/
 
 The IME sets `ORT_DYLIB_PATH` to the packaged `libonnxruntime.so` before loading
 real ONNX model packs.
+
+The Android app declares no network permission and disables cleartext traffic;
+real dictation must work from app-private model files and packaged native
+libraries.
 
 ## Model Packs
 

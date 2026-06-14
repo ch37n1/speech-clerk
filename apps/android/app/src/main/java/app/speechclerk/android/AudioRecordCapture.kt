@@ -12,6 +12,8 @@ final class AudioRecordCapture {
     private var audioRecord: AudioRecord? = null
     private var worker: Thread? = null
 
+    fun isRunning(): Boolean = running.get()
+
     @SuppressLint("MissingPermission")
     fun start(onSamples: (List<Float>, UInt, UShort) -> Unit) {
         if (running.get()) {
@@ -64,7 +66,6 @@ final class AudioRecordCapture {
         try {
             recorder?.stop()
         } catch (_: IllegalStateException) {
-            return
         } finally {
             recorder?.release()
         }

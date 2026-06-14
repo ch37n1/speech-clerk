@@ -10,6 +10,7 @@ final class DictationViewModel: ObservableObject {
     @Published var isRecording = false
     @Published var modelLoaded = false
     @Published var statusText = "Idle"
+    @Published var modelStateText = ""
     @Published var microphoneStateText = "Not requested"
     @Published var pasteControlStateText = "Not checked"
     @Published var replacementPattern: String
@@ -38,6 +39,10 @@ final class DictationViewModel: ObservableObject {
         modelPacksRootURL = rootURL
         models = loadedModels
         selectedModelID = loadedModels.first?.id ?? ""
+        modelStateText =
+            loadedModels.isEmpty
+            ? "Install a local model pack"
+            : "Ready to load \(loadedModels.first?.displayName ?? "selected model")"
         replacementPattern = UserDefaults.standard.string(forKey: "replacementPattern") ?? "parakeet"
         replacementValue = UserDefaults.standard.string(forKey: "replacementValue") ?? "Canary"
         bridge = try? RustDictationBridge(modelPacksURL: modelPacksRootURL)
@@ -48,6 +53,7 @@ final class DictationViewModel: ObservableObject {
     func loadSelectedModel() {
         guard !selectedModelID.isEmpty else {
             statusText = "No model"
+            modelStateText = "Install a local model pack"
             return
         }
 
@@ -55,10 +61,12 @@ final class DictationViewModel: ObservableObject {
             try bridge?.loadModel(id: selectedModelID)
             modelLoaded = true
             statusText = "Model loaded"
+            modelStateText = "Loaded \(displayName(for: selectedModelID))"
             applyReplacementRule()
         } catch {
             modelLoaded = false
             statusText = "Model error"
+            modelStateText = "Check manifest files and SHA-256 checksums"
         }
     }
 
@@ -189,6 +197,7 @@ final class DictationViewModel: ObservableObject {
 
     private func stopRecording() {
         audioCapture.stop()
+        statusText = "Transcribing"
 
         do {
             let transcript = try bridge?.stopRecording()
@@ -213,6 +222,10 @@ final class DictationViewModel: ObservableObject {
             isRecording = false
             statusText = "Stop error"
         }
+    }
+
+    private func displayName(for modelID: String) -> String {
+        models.first { $0.id == modelID }?.displayName ?? modelID
     }
 
     private func refreshMicrophoneState() {

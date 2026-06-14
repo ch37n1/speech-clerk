@@ -3,11 +3,16 @@
     <string name="app_name">Speech Clerk</string>
     <string name="ime_name">Speech Clerk Keyboard</string>
     <string name="mic_button_label">Mic</string>
+    <string name="mic_button_accessibility">Start dictation</string>
     <string name="stop_button_label">Stop</string>
+    <string name="stop_button_accessibility">Stop dictation</string>
     <string name="status_idle">Ready</string>
     <string name="status_no_model">Install a local model pack</string>
+    <string name="status_model_loaded">Model ready: %1$s</string>
+    <string name="status_model_error">Model pack failed validation</string>
     <string name="status_mic_permission">Allow microphone access, then tap Mic again</string>
     <string name="status_recording">Recording</string>
+    <string name="status_transcribing">Transcribing</string>
     <string name="status_inserted">Inserted</string>
     <string name="status_no_audio">No audio captured</string>
     <string name="status_error">Dictation error</string>

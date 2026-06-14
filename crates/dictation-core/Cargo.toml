@@ -10,6 +10,7 @@ asr-api = { path = "../asr-api" }
 audio-pipeline = { path = "../audio-pipeline" }
 model-pack = { path = "../model-pack" }
 postprocess = { path = "../postprocess" }
+tracing = { version = "0.1.44", default-features = false }
 
 [lints]
 workspace = true

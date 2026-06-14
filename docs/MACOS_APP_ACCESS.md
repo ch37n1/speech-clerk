@@ -83,6 +83,7 @@ change; identifiers should only change when the app contract changes.
 Current identifiers:
 
 - `app-status`
+- `model-state`
 - `model-picker`
 - `load-model-button`
 - `microphone-permission-button`

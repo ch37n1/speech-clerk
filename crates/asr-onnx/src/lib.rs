@@ -11,14 +11,21 @@ use asr_api::{
     AsrCapabilities, AsrEngine, AsrError, ModelAsset, ModelConfig, PcmAudio, TranscribeOptions,
     Transcript,
 };
-use ort::session::Session;
+use ort::session::{Session, builder::GraphOptimizationLevel};
 use ort::value::{Tensor, ValueType};
 use serde_json::Value as JsonValue;
+use tracing::{debug, info};
 
 const FIXTURE_TOKENIZER_HEADER: &str = "speech-clerk-tokenizer-fixture-v1";
 const ORT_DYLIB_ENV: &str = "ORT_DYLIB_PATH";
+const ORT_INTRA_THREADS_ENV: &str = "SPEECH_CLERK_ORT_INTRA_THREADS";
+const ORT_INTER_THREADS_ENV: &str = "SPEECH_CLERK_ORT_INTER_THREADS";
+const ORT_PARALLEL_ENV: &str = "SPEECH_CLERK_ORT_PARALLEL";
+const ORT_MEMORY_PATTERN_ENV: &str = "SPEECH_CLERK_ORT_MEMORY_PATTERN";
 const SAMPLE_RATE_HZ: u32 = 16_000;
 const DEFAULT_MAX_SYMBOLS_PER_STEP: usize = 10;
+const DEFAULT_INTER_THREADS: usize = 1;
+const MAX_DEFAULT_INTRA_THREADS: usize = 4;
 
 /// ASR engine for V1 ONNX model packs.
 #[derive(Debug, Default)]
@@ -53,11 +60,21 @@ impl AsrEngine for OrtAsrEngine {
         let parakeet_config = load_parakeet_config(config)?;
         read_required_asset(&model_asset.absolute_path, "model")?;
         let sessions = if tokenizer.is_fixture() {
+            debug!(
+                model_id = %config.model_id,
+                "loading fixture ONNX tokenizer path without runtime sessions"
+            );
             Vec::new()
         } else {
-            load_onnx_sessions(config)?
+            load_onnx_sessions(config, OrtSessionTuning::from_env()?)?
         };
 
+        info!(
+            model_id = %config.model_id,
+            display_name = %config.display_name,
+            session_count = sessions.len(),
+            "loaded ONNX ASR model"
+        );
         self.loaded_model = Some(LoadedOnnxModel {
             config: config.clone(),
             tokenizer,
@@ -88,6 +105,13 @@ impl AsrEngine for OrtAsrEngine {
         let model = self.loaded_model.as_ref().ok_or_else(|| {
             AsrError::TranscriptionFailed("onnx model has not been loaded".to_owned())
         })?;
+
+        debug!(
+            model_id = %model.config.model_id,
+            sample_count = audio.samples.len(),
+            language_hint = options.language_hint.as_deref().unwrap_or("auto"),
+            "transcribing ONNX audio chunk"
+        );
 
         if let Some(transcript) = &model.tokenizer.fixture_transcript {
             return Ok(Transcript {
@@ -140,6 +164,41 @@ struct OrtModelSession {
     role: String,
     inputs: Vec<ModelIo>,
     session: Session,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct OrtSessionTuning {
+    intra_threads: usize,
+    inter_threads: usize,
+    parallel_execution: bool,
+    memory_pattern: bool,
+}
+
+impl Default for OrtSessionTuning {
+    fn default() -> Self {
+        Self {
+            intra_threads: default_intra_threads(),
+            inter_threads: DEFAULT_INTER_THREADS,
+            parallel_execution: false,
+            memory_pattern: false,
+        }
+    }
+}
+
+impl OrtSessionTuning {
+    fn from_env() -> Result<Self, AsrError> {
+        let defaults = Self::default();
+        Ok(Self {
+            intra_threads: parse_positive_usize_env(ORT_INTRA_THREADS_ENV)?
+                .unwrap_or(defaults.intra_threads),
+            inter_threads: parse_positive_usize_env(ORT_INTER_THREADS_ENV)?
+                .unwrap_or(defaults.inter_threads),
+            parallel_execution: parse_bool_env(ORT_PARALLEL_ENV)?
+                .unwrap_or(defaults.parallel_execution),
+            memory_pattern: parse_bool_env(ORT_MEMORY_PATTERN_ENV)?
+                .unwrap_or(defaults.memory_pattern),
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -796,7 +855,10 @@ fn argmax(values: &[f32]) -> Option<(usize, f32)> {
         .max_by(|(_, left), (_, right)| left.total_cmp(right))
 }
 
-fn load_onnx_sessions(config: &ModelConfig) -> Result<Vec<OrtModelSession>, AsrError> {
+fn load_onnx_sessions(
+    config: &ModelConfig,
+    tuning: OrtSessionTuning,
+) -> Result<Vec<OrtModelSession>, AsrError> {
     let runtime_path = std::env::var(ORT_DYLIB_ENV).map_err(|_| {
         AsrError::LoadFailed(format!(
             "{ORT_DYLIB_ENV} must point to a local ONNX Runtime dylib before loading real ONNX packs"
@@ -814,6 +876,16 @@ fn load_onnx_sessions(config: &ModelConfig) -> Result<Vec<OrtModelSession>, AsrE
             "{ORT_DYLIB_ENV} points to a missing file: {runtime_path}"
         )));
     }
+
+    info!(
+        model_id = %config.model_id,
+        intra_threads = tuning.intra_threads,
+        inter_threads = tuning.inter_threads,
+        parallel_execution = tuning.parallel_execution,
+        memory_pattern = tuning.memory_pattern,
+        runtime_path = %runtime_path,
+        "initializing ONNX Runtime sessions"
+    );
 
     catch_ort_panic(|| {
         ort::init_from(&runtime_path)
@@ -839,13 +911,28 @@ fn load_onnx_sessions(config: &ModelConfig) -> Result<Vec<OrtModelSession>, AsrE
 
     onnx_assets
         .into_iter()
-        .map(load_onnx_session)
+        .map(|asset| load_onnx_session(asset, tuning))
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn load_onnx_session(asset: ModelAsset) -> Result<OrtModelSession, AsrError> {
+fn load_onnx_session(
+    asset: ModelAsset,
+    tuning: OrtSessionTuning,
+) -> Result<OrtModelSession, AsrError> {
+    let log_id = format!("speech-clerk-{}", asset.role);
     let session = catch_ort_panic(|| {
         Session::builder()
+            .and_then(|builder| builder.with_optimization_level(GraphOptimizationLevel::Level3))
+            .and_then(|builder| builder.with_intra_threads(tuning.intra_threads))
+            .and_then(|builder| builder.with_inter_threads(tuning.inter_threads))
+            .and_then(|builder| builder.with_parallel_execution(tuning.parallel_execution))
+            .and_then(|builder| builder.with_memory_pattern(tuning.memory_pattern))
+            .and_then(|builder| builder.with_prepacking(true))
+            .and_then(|builder| builder.with_quant_qdq(true))
+            .and_then(|builder| builder.with_qdq_cleanup())
+            .and_then(|builder| builder.with_intra_op_spinning(false))
+            .and_then(|builder| builder.with_inter_op_spinning(false))
+            .and_then(|builder| builder.with_log_id(log_id))
             .and_then(|builder| builder.commit_from_file(&asset.absolute_path))
             .map_err(map_ort_load_error)
     })??;
@@ -863,6 +950,57 @@ fn load_onnx_session(asset: ModelAsset) -> Result<OrtModelSession, AsrError> {
         inputs,
         session,
     })
+}
+
+fn default_intra_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|threads| threads.get())
+        .map(|threads| threads.clamp(1, MAX_DEFAULT_INTRA_THREADS))
+        .unwrap_or(MAX_DEFAULT_INTRA_THREADS)
+}
+
+fn parse_positive_usize_env(name: &str) -> Result<Option<usize>, AsrError> {
+    match std::env::var(name) {
+        Ok(value) => parse_positive_usize(&value, name).map(Some),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(AsrError::LoadFailed(format!(
+            "{name} is not valid UTF-8: {error}"
+        ))),
+    }
+}
+
+fn parse_positive_usize(value: &str, name: &str) -> Result<usize, AsrError> {
+    let parsed = value.trim().parse::<usize>().map_err(|error| {
+        AsrError::LoadFailed(format!("{name} must be a positive integer: {error}"))
+    })?;
+
+    if parsed == 0 {
+        return Err(AsrError::LoadFailed(format!(
+            "{name} must be greater than zero"
+        )));
+    }
+
+    Ok(parsed)
+}
+
+fn parse_bool_env(name: &str) -> Result<Option<bool>, AsrError> {
+    match std::env::var(name) {
+        Ok(value) => parse_bool(&value, name).map(Some),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(AsrError::LoadFailed(format!(
+            "{name} is not valid UTF-8: {error}"
+        ))),
+    }
+}
+
+fn parse_bool(value: &str, name: &str) -> Result<bool, AsrError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(AsrError::LoadFailed(format!(
+            "{name} must be one of 1, 0, true, false, yes, no, on, or off"
+        ))),
+    }
 }
 
 fn catch_ort_panic<T>(operation: impl FnOnce() -> T) -> Result<T, AsrError> {
@@ -945,7 +1083,10 @@ fn field_value(input: &str, field: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{OrtAsrEngine, ParakeetConfig, TdtDecision, TokenizerAsset, parse_vocabulary};
+    use super::{
+        OrtAsrEngine, OrtSessionTuning, ParakeetConfig, TdtDecision, TokenizerAsset, parse_bool,
+        parse_positive_usize, parse_vocabulary,
+    };
     use asr_api::{AsrEngine, ModelAsset, ModelConfig, PcmAudio, TranscribeOptions};
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -1096,6 +1237,28 @@ mod tests {
         let result = TdtDecision::greedy(&[0.1, 0.9, 0.3], 3);
 
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn default_ort_tuning_keeps_inter_threads_bounded() {
+        let tuning = OrtSessionTuning::default();
+
+        assert_eq!(tuning.inter_threads, 1);
+    }
+
+    #[test]
+    fn parse_positive_usize_rejects_zero_threads() {
+        let result = parse_positive_usize("0", "SPEECH_CLERK_ORT_INTRA_THREADS");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn parse_bool_accepts_release_candidate_env_values() -> Result<(), Box<dyn std::error::Error>> {
+        let enabled = parse_bool("on", "SPEECH_CLERK_ORT_PARALLEL")?;
+
+        assert!(enabled);
+        Ok(())
     }
 
     fn fixture_config(pack_dir: &Path, model_path: &Path, tokenizer_path: &Path) -> ModelConfig {

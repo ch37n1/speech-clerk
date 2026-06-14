@@ -93,6 +93,7 @@ names.
 Current identifiers:
 
 - `app-status`
+- `model-state`
 - `model-picker`
 - `load-model-button`
 - `microphone-permission-button`

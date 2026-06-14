@@ -9,6 +9,7 @@ SWIFTLINT ?= swiftlint
 GRADLE ?= gradle
 CARGO_NDK ?= cargo ndk
 CALL_ARGS ?=
+MODEL_PACK ?=
 ANDROID_ABI ?= arm64-v8a
 ANDROID_SDK_ROOT ?= $(if $(ANDROID_HOME),$(ANDROID_HOME),/opt/homebrew/share/android-commandlinetools)
 ANDROID_NDK_HOME ?= /opt/homebrew/share/android-ndk
@@ -32,7 +33,7 @@ SWIFT_SOURCES := $(shell find apps/macos \
 	-path '*/Generated/UniFFI/*' -prune -o \
 	-name '*.swift' -print 2>/dev/null)
 
-.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check android-uniffi android-rust android-build android-check macos-ui macos-ui-build macos-e2e-build macos-e2e-launch macos-e2e-smoke macos-e2e-screenshot macos-e2e-stop fix check clippy test deny machete bacon web-check c clean
+.PHONY: help init install-tools install-swift-tools fmt fmt-check toml-fmt toml-check swift-fmt swift-fmt-check swift-lint swift-build swift-test swift-check android-uniffi android-rust android-build android-check macos-ui macos-ui-build macos-e2e-build macos-e2e-launch macos-e2e-smoke macos-e2e-screenshot macos-e2e-stop rc-check fix check clippy test deny machete bacon web-check c clean
 
 help: ## Show available make targets
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -137,6 +138,13 @@ macos-e2e-screenshot: ## Capture a macOS e2e screenshot
 macos-e2e-stop: ## Stop the macOS app launched for e2e testing
 	@sh tools/macos-e2e.sh stop
 
+rc-check: ## Run release-candidate static and model-pack checks
+	@test -f docs/RELEASE_CANDIDATE.md
+	@if grep -q 'android.permission.INTERNET' apps/android/app/src/main/AndroidManifest.xml; then echo "Android manifest must not declare INTERNET for local-only V1"; exit 1; fi
+	@grep -q 'android:usesCleartextTraffic="false"' apps/android/app/src/main/AndroidManifest.xml
+	@$(CARGO) run --locked -p model-packager -- validate --pack apps/macos/Sources/SpeechClerkMacSupport/Resources/ModelPacks/fake-local
+	@if [ -n "$(MODEL_PACK)" ]; then $(CARGO) run --locked -p model-packager -- validate --pack "$(MODEL_PACK)"; else echo "MODEL_PACK not set; skipping real model-pack validation"; fi
+
 fix: ## Apply safe Rust compiler fixes
 	@if [ "$(HAS_CARGO_WORKSPACE)" = "yes" ]; then $(CARGO) fix --workspace --all-targets --all-features --allow-dirty; else echo "No Cargo workspace found; skipping cargo fix"; fi
 
@@ -161,7 +169,7 @@ bacon: ## Run the fast Rust feedback loop when bacon is installed
 web-check: ## Run Biome only when web-style project files exist
 	@if [ -n "$(HAS_WEB)" ] && command -v $(BIOME) >/dev/null 2>&1; then $(BIOME) check .; else echo "No Biome-managed web app found; skipping web check"; fi
 
-c: fmt-check toml-check check clippy test deny machete swift-check android-check web-check ## Run the full local quality gate
+c: fmt-check toml-check check clippy test rc-check deny machete swift-check android-check web-check ## Run the full local quality gate
 
 clean: ## Remove local build artifacts
 	@if [ "$(HAS_CARGO_WORKSPACE)" = "yes" ]; then $(CARGO) clean; else echo "No Cargo workspace found; skipping cargo clean"; fi

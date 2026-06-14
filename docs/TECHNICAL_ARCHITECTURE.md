@@ -274,6 +274,32 @@ Use a bounded queue between capture and processing.
 Run ASR on a worker thread.
 ```
 
+## Release-Candidate Runtime Defaults
+
+Phase 4 hardening keeps these runtime knobs in Rust-owned boundaries:
+
+```text
+Audio queue capacity: 64 captured frames
+Minimum speech chunk: 700 ms
+Target chunk length: 5-12 s
+Maximum chunk length: 15 s
+Pre-roll: 250 ms
+Post-roll: 500 ms
+Speech threshold: 0.002
+ONNX graph optimization: Level 3
+ONNX intra-op threads: min(available CPU parallelism, 4)
+ONNX inter-op threads: 1
+ONNX execution mode: sequential
+ONNX memory pattern: disabled for variable chunk sizes
+```
+
+ONNX session tuning can be overridden with
+`SPEECH_CLERK_ORT_INTRA_THREADS`, `SPEECH_CLERK_ORT_INTER_THREADS`,
+`SPEECH_CLERK_ORT_PARALLEL`, and `SPEECH_CLERK_ORT_MEMORY_PATTERN`.
+Native shells can opt in to Rust stderr tracing with `SPEECH_CLERK_LOG` set to
+`error`, `warn`, `info`, `debug`, or `trace`; logging remains disabled when the
+variable is unset.
+
 ---
 
 # 9. Model Pack Format
