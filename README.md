@@ -6,6 +6,7 @@ Speech Clerk is a local-first speech-to-text app. V1 targets macOS first and And
 
 - `docs/TECHNICAL_ARCHITECTURE.md` defines the V1 implementation architecture.
 - `docs/ROADMAP.md` defines phase-by-phase manual verification deliverables.
+- `docs/CI_CD_RELEASES.md` defines the V1 GitHub Actions release approach.
 - `docs/DDD_GUIDE.md` defines crate boundaries and domain ownership rules.
 - `docs/SWIFT_GUIDE.md` defines macOS Swift boundaries, tooling, and tests.
 - `apps/android/README.md` defines Android IME setup, native library packaging,

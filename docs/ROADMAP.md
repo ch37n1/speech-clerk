@@ -175,3 +175,30 @@ Out of scope:
 Manual verification deliverable:
 
 Install the macOS app and Android IME from clean release-candidate builds, install the default model pack locally, dictate into real text fields on both platforms, run the benchmark workflow, and confirm that documented setup steps are sufficient for another person to repeat the workflow without developer assistance. During the same pass, review the primary macOS and Android surfaces in idle, recording, transcribing, permission/error, and model-missing states, and confirm that the UI looks coherent enough for a V1 release candidate.
+
+## Phase 5 - CI/CD Release Artifacts
+
+Add the simple GitHub Actions release flow described in `docs/CI_CD_RELEASES.md` so successful builds produce downloadable installable artifacts.
+
+Scope:
+
+- Keep the existing CI quality gate for pull requests and `main`.
+- Add release packaging targets for macOS and Android.
+- Package the macOS app as an unsigned, unnotarized `.app` ZIP.
+- Build an Android release APK signed with a stable GitHub Secrets-backed keystore.
+- Publish `SpeechClerk-macos.zip` and `SpeechClerk-android.apk` to a mutable `nightly` GitHub Release on every push to `main`.
+- Support equivalent artifacts for `v*` tag releases.
+- Document install expectations, release secrets, and known unsigned-build warnings.
+
+Out of scope:
+
+- App Store distribution.
+- Play Store distribution.
+- macOS notarization.
+- External CI services.
+- Self-hosted runners.
+- Automated semantic version management.
+
+Manual verification deliverable:
+
+Push to `main`, open the `nightly` GitHub Release, download the macOS ZIP and Android APK, install or launch both artifacts on real devices, and confirm they come from the latest successful commit. Push a test `v*` tag and confirm that the versioned release receives the same artifact types.
